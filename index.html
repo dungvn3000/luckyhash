@@ -174,9 +174,9 @@
               <select id="batch-size" class="form-select lh-input"
                       x-model="settings.batchSize"
                       @change="save('lh_batch_size', settings.batchSize)">
-                <option value="1048576">1M nonces</option>
-                <option value="4194304" selected>4M nonces</option>
-                <option value="16777216">16M nonces</option>
+                 <option value="1048576">1M nonces</option>
+                 <option value="4194304">4M nonces</option>
+                 <option value="16777216">16M nonces</option>
               </select>
             </div>
 
@@ -466,7 +466,9 @@ function appData() {
       address:   localStorage.getItem('lh_btc_address')|| '',
       worker:    localStorage.getItem('lh_worker_name')|| 'luckyhash01',
       threads:   localStorage.getItem('lh_threads')    || '65536',
-      batchSize: localStorage.getItem('lh_batch_size') || '4194304',
+      // Mobile GPUs use short-batch default: long dispatches risk the OS
+      // watchdog killing the device ("GPU device lost")
+      batchSize: localStorage.getItem('lh_batch_size') || (/Android|iPhone|iPad/i.test(navigator.userAgent) ? '1048576' : '4194304'),
     },
 
     save(key, val) { localStorage.setItem(key, val); },

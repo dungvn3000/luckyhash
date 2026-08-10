@@ -265,6 +265,14 @@ class GPUEngine {
     if (!adapter) throw new Error('No WebGPU adapter found');
     this.device = await adapter.requestDevice();
 
+    // Track device loss (phones revoke the GPU under watchdog timeout,
+    // thermal/memory pressure, or when the tab goes to background)
+    this.lost = false; this.lostReason = '';
+    this.device.lost.then((info) => {
+      this.lost = true;
+      this.lostReason = `${info.reason}${info.message ? ': ' + info.message : ''}`;
+    });
+
     // 30 u32 = 120 bytes input; pad to 256 for alignment
     this.inputBuf  = this.device.createBuffer({ size: 256, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.resultBuf = this.device.createBuffer({ size: 32,  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
@@ -803,6 +811,20 @@ class LuckyHashMiner {
     }
   }
 
+  // ── GPU device lost → session fallback to CPU ─────────────────
+
+  async _gpuLost(errMsg) {
+    this.log(`⚠️ GPU device lost (${this.gpu.lostReason || errMsg}) — the OS revoked it: watchdog timeout, thermal/memory pressure, or tab backgrounded.`, 'warn');
+    this.log('🔄 Falling back to CPU miners…', 'info');
+    try { this.gpu.destroy(); } catch {}
+    this.engine = 'cpu';
+    if (!this.cpu.workers.length) await this.cpu.init();
+    this._updateEngine('cpu');
+    this._bestPacked = 0x100000000;
+    this._setStatus('mining', `Mining (CPU ×${this.cpu.numWorkers})`);
+    this.log(`✅ CPU mining with ${this.cpu.numWorkers} threads`, 'success');
+  }
+
   // ── Stop ──────────────────────────────────────────────────────
 
   stop() {
@@ -960,6 +982,9 @@ class LuckyHashMiner {
           _h80 = new Uint8Array(80);
           _h80.set(buildHeader76(job));
           const res = await this.gpu.runBatch(_h80, target32, nonceStart >>> 0, BATCH);
+          // A revoked device turns queue ops into silent no-ops that return
+          // stale buffer contents (would resubmit duplicates) — detect here
+          if (this.gpu.lost) throw new Error('GPU device lost');
           nonces = res.nonces;
           hashes = BATCH;
           // Realtime best hash: GPU tracked a packed (quality, offset) key —
@@ -978,6 +1003,12 @@ class LuckyHashMiner {
           _h80   = h76; // 76 bytes; _checkBestHash pads to 80 with nonce
         }
       } catch (e) {
+        // GPU device revoked mid-mining (phones do this under pressure):
+        // retrying on a lost device loops forever → switch to CPU instead
+        if (this.engine === 'gpu' && (this.gpu.lost || /lost/i.test(e.message))) {
+          await this._gpuLost(e.message);
+          continue;
+        }
         this.log(`⚠️ Engine error: ${e.message}`, 'error');
         await new Promise(r => setTimeout(r, 500));
         continue;

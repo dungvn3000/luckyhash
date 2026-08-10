@@ -83,12 +83,17 @@ Then open **http://localhost:8080** in Chrome 113+ or Edge 113+.
 
 | Browser | WebGPU | CPU Mode |
 |---------|--------|----------|
-| Chrome 113+ | ✅ Full | ✅ |
-| Edge 113+ | ✅ Full | ✅ |
+| Chrome / Edge 113+ (desktop) | ✅ Full | ✅ |
+| Chrome 121+ (Android) | ✅ ¹ | ✅ |
 | Opera 99+ | ✅ Full | ✅ |
-| Safari 18+ (macOS 14+) | ✅ Full | ✅ |
+| Safari 26+ (macOS / iOS) | ✅ Full | ✅ |
 | Firefox | ❌ | ✅ fallback |
 | Any other | ❌ | ✅ fallback |
+
+> ¹ **Mobile note:** the OS can revoke the GPU device mid-mining (watchdog
+> timeout, thermal/memory pressure, or a backgrounded tab). The miner detects
+> this and automatically falls back to CPU workers, so mining continues —
+> mobile sessions also default to the lighter 1M batch to keep dispatches short.
 
 ---
 
@@ -100,7 +105,7 @@ Then open **http://localhost:8080** in Chrome 113+ or Edge 113+.
 | BTC Address | — | Your Bitcoin receiving address |
 | Worker | `luckyhash01` | Worker name shown in pool dashboard |
 | Workgroup | `64K (Light)` | GPU dispatch size — higher = more hashes/batch |
-| Batch Size | `4M nonces` | Nonces processed per mining cycle |
+| Batch Size | `4M nonces` (`1M` on mobile) | Nonces processed per mining cycle |
 
 All settings persist across sessions via `localStorage`.
 
