@@ -196,6 +196,9 @@ fn compress(w: ptr<function, array<u32, 64>>, s: ptr<function, array<u32, 8>>) {
 @group(0) @binding(1) var<storage, read_write> out_buf: array<atomic<u32>>;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  // inp[29] = exact batch size: excess threads from the /256 round-up exit
+  // here so they don't redo the start of the next batch's nonce range
+  if (gid.x >= inp[29]) { return; }
   let nonce    = inp[28] + gid.x;
   let nonce_le = (nonce << 24u)
                | ((nonce <<  8u) & 0x00FF0000u)
@@ -231,16 +234,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (i == 7u)               { below = true; }
   }
 
+  // Found a share: claim a slot (up to 4 per batch) and record the nonce
   if (below) {
-    atomicStore(&out_buf[0], 1u);
-    atomicStore(&out_buf[1], nonce);
+    let idx = atomicAdd(&out_buf[0], 1u);
+    if (idx < 4u) { atomicStore(&out_buf[1u + idx], nonce); }
   }
-  // Track minimum hash[0] across all threads for realtime best-hash display
-  // slot[2] = min hash[0] seen, slot[3] = nonce for that min
-  let prev = atomicMin(&out_buf[2], s2[0]);
-  if (s2[0] < prev) {
-    atomicStore(&out_buf[3], nonce);
-  }
+  // Best-hash display: ONE atomicMin packs (top 8 bits of hash[0]) ++
+  // (thread offset within this batch, < 2^24 after the dispatch clamp).
+  // Packing keeps quality and nonce consistent — the old two-slot version
+  // could tear when threads raced between the min and the store.
+  let key = ((s2[0] >> 24u) << 24u) | (gid.x & 0xFFFFFFu);
+  atomicMin(&out_buf[5], key);
 }
 `;
 
@@ -261,10 +265,10 @@ class GPUEngine {
     if (!adapter) throw new Error('No WebGPU adapter found');
     this.device = await adapter.requestDevice();
 
-    // 29 u32 = 116 bytes; pad to 256 for alignment
+    // 30 u32 = 120 bytes input; pad to 256 for alignment
     this.inputBuf  = this.device.createBuffer({ size: 256, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    this.resultBuf = this.device.createBuffer({ size: 16,  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
-    this.readBuf   = this.device.createBuffer({ size: 16,  usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    this.resultBuf = this.device.createBuffer({ size: 32,  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    this.readBuf   = this.device.createBuffer({ size: 32,  usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
 
     // Capture shader compile errors explicitly
     this.device.pushErrorScope('validation');
@@ -293,17 +297,18 @@ class GPUEngine {
     // option = 65536 workgroups) trigger an async validation error that
     // silently drops the whole dispatch — fake hashrate, zero real work.
     batchSize = Math.min(batchSize, 65535 * 256);
-    // Flat layout: [header x20][target x8][nonce_start]
-    const data = new Uint32Array(29);
+    // Flat layout: [header x20][target x8][nonce_start][batch_size]
+    const data = new Uint32Array(30);
     const hdv  = new DataView(header80.buffer, header80.byteOffset, 80);
     for (let i = 0; i < 20; i++) data[i]    = hdv.getUint32(i * 4, false);
     const tdv  = new DataView(target32.buffer, target32.byteOffset, 32);
     for (let i = 0; i < 8;  i++) data[20+i] = tdv.getUint32(i * 4, false);
     data[28] = nonceStart >>> 0;
+    data[29] = batchSize >>> 0;
 
     this.device.queue.writeBuffer(this.inputBuf,  0, data);
-    // Reset: found=0, nonce=0, minHash0=0xFFFFFFFF, minNonce=0
-    this.device.queue.writeBuffer(this.resultBuf, 0, new Uint32Array([0, 0, 0xFFFFFFFF, 0]));
+    // Reset: foundCount=0, nonce slots [1..4]=0, packedBest=0xFFFFFFFF, spares=0
+    this.device.queue.writeBuffer(this.resultBuf, 0, new Uint32Array([0, 0, 0, 0, 0, 0xFFFFFFFF, 0, 0]));
 
     const enc  = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
@@ -311,19 +316,22 @@ class GPUEngine {
     pass.setBindGroup(0, this.bindGroup);
     pass.dispatchWorkgroups(Math.ceil(batchSize / 256));
     pass.end();
-    enc.copyBufferToBuffer(this.resultBuf, 0, this.readBuf, 0, 16);
+    enc.copyBufferToBuffer(this.resultBuf, 0, this.readBuf, 0, 32);
     this.device.queue.submit([enc.finish()]);
     await this.readBuf.mapAsync(GPUMapMode.READ);
     const v     = new Uint32Array(this.readBuf.getMappedRange().slice(0));
     this.readBuf.unmap();
+    // Up to 4 winning nonces per batch (hits beyond that are dropped)
+    const foundCount = Math.min(v[0], 4);
+    const nonces = [];
+    for (let i = 0; i < foundCount; i++) nonces.push(v[1 + i]);
     return {
-      nonce:    v[0] ? v[1] : null,
-      minHash0: v[2],          // best hash[0] in this batch
-      minNonce: v[3],          // nonce that produced it
+      nonces,
+      minPacked: v[5],   // (top8(hash[0]) << 24) | thread offset — consistent pair
     };
   }
   destroy() {
-    this.uniformBuf?.destroy(); this.resultBuf?.destroy(); this.readBuf?.destroy();
+    this.inputBuf?.destroy(); this.resultBuf?.destroy(); this.readBuf?.destroy();
     this.device?.destroy(); this.ready = false;
   }
 }
@@ -346,7 +354,7 @@ class CPUEngine {
   }
   /**
    * Split batchSize across workers, each gets a slice of the nonce range.
-   * Returns null or winning nonce.
+   * Returns every winning nonce found in the batch.
    */
   async runBatch(header76, target32u, nonceStart, batchSize) {
     const sliceSize = Math.ceil(batchSize / this.numWorkers);
@@ -354,7 +362,7 @@ class CPUEngine {
     const promises = this.workers.map((w, i) => {
       const start = (nonceStart + i * sliceSize) >>> 0;
       const count = Math.min(sliceSize, batchSize - i * sliceSize);
-      if (count <= 0) return Promise.resolve({ nonce: null, hashes: 0 });
+      if (count <= 0) return Promise.resolve({ nonces: [], hashes: 0 });
 
       // Each worker gets its OWN copy — transferring the same buffer to multiple
       // workers detaches it after the first transfer causing "already detached".
@@ -373,8 +381,8 @@ class CPUEngine {
 
     const results = await Promise.all(promises);
     const totalHashes = results.reduce((a, r) => a + r.hashes, 0);
-    const found = results.find(r => r.nonce !== null);
-    return { nonce: found ? found.nonce : null, hashes: totalHashes };
+    const nonces = results.flatMap(r => r.nonces);
+    return { nonces, hashes: totalHashes };
   }
   destroy() {
     this.workers.forEach(w => w.terminate());
@@ -630,6 +638,8 @@ class LuckyHashMiner {
     this._jobChanged   = false;
     this._uptimeTmr    = null;
     this._chartTmr     = null;
+    this._merkleKey    = '';
+    this._bestPacked   = 0x100000000;
   }
 
   // ── Helpers to update Alpine UI state ────────────────────────
@@ -719,7 +729,8 @@ class LuckyHashMiner {
     }
     this._bestHS = 0;
     this._bestBlockHashHex = 'f'.repeat(64);
-    this._bestHash0        = 0xFFFFFFFF; // fast uint32 pre-check
+    this._bestPacked       = 0x100000000; // > any packed u32 key → first batch triggers
+    this._merkleKey        = '';
     this.chart = new HashrateChart('hashrate-chart');
 
     this._uptimeTmr = setInterval(() => {
@@ -784,7 +795,7 @@ class LuckyHashMiner {
         if (prev === 'gpu') this.gpu.destroy();
         this.log(`✅ Switched to CPU ×${this.cpu.numWorkers}`, 'success');
       }
-      this._bestHash0 = 0xFFFFFFFF;
+      this._bestPacked = 0x100000000;
     } catch(e) {
       this.engine = prev;
       this._updateEngine(prev);
@@ -916,7 +927,10 @@ class LuckyHashMiner {
 
   async _loop() {
     const s     = this._ui?.settings || {};
-    const BATCH = parseInt(s.batchSize) || parseInt(document.getElementById('batch-size')?.value) || 4194304;
+    const rawBatch = parseInt(s.batchSize) || parseInt(document.getElementById('batch-size')?.value) || 4194304;
+    // Clamp to what one WebGPU dispatch can cover (65535 workgroups × 256),
+    // so hash accounting matches the work actually performed
+    const BATCH = Math.min(rawBatch, 65535 * 256);
     let nonceStart = 0;
 
     while (this._miningActive && this.running) {
@@ -930,28 +944,36 @@ class LuckyHashMiner {
 
       const job = this.currentJob;
       const en2 = this._en2Counter.toString(16).padStart(this.extranonce2Size * 2, '0');
-      job.merkleRoot = buildMerkleRoot(job, this.extranonce1, en2);
+      // Cache: rebuild the merkle root only when job/extranonce changed —
+      // previously recomputed (up to 2×SHA256d per branch) on every batch
+      const mk = `${this.extranonce1}:${en2}:${job.jobId}`;
+      if (this._merkleKey !== mk) {
+        job.merkleRoot = buildMerkleRoot(job, this.extranonce1, en2);
+        this._merkleKey = mk;
+      }
 
       const target32 = diffToTarget(this.difficulty);
-      let nonce = null, hashes = 0, _h80 = null;
+      let nonces = [], hashes = 0, _h80 = null;
 
       try {
         if (this.engine === 'gpu') {
           _h80 = new Uint8Array(80);
           _h80.set(buildHeader76(job));
-          const res  = await this.gpu.runBatch(_h80, target32, nonceStart >>> 0, BATCH);
-          nonce      = res.nonce;
-          hashes     = BATCH;
-          // Realtime best hash: GPU tracked the minimum hash[0] of this batch
-          if (res.minHash0 < this._bestHash0) {
-            this._bestHash0 = res.minHash0;
-            this._checkBestHash(_h80, res.minNonce); // async, non-blocking
+          const res = await this.gpu.runBatch(_h80, target32, nonceStart >>> 0, BATCH);
+          nonces = res.nonces;
+          hashes = BATCH;
+          // Realtime best hash: GPU tracked a packed (quality, offset) key —
+          // the low 24 bits hold the thread offset of the batch's best hash
+          if (res.minPacked < this._bestPacked) {
+            this._bestPacked = res.minPacked;
+            const off = res.minPacked & 0xFFFFFF;
+            this._checkBestHash(_h80, (nonceStart + off) >>> 0); // async, non-blocking
           }
         } else {
           const h76 = buildHeader76(job);
           const tgt = targetToU32(target32);
           const res = await this.cpu.runBatch(h76, tgt, nonceStart >>> 0, BATCH);
-          nonce  = res.nonce;
+          nonces = res.nonces;
           hashes = res.hashes;
           _h80   = h76; // 76 bytes; _checkBestHash pads to 80 with nonce
         }
@@ -964,7 +986,7 @@ class LuckyHashMiner {
       this.totalHashes += hashes;
       this.hashWindow.push({ t: Date.now(), count: hashes });
 
-      if (nonce !== null) {
+      for (const nonce of nonces) {
         this.log(`⚡ NONCE FOUND! 0x${nonce.toString(16).padStart(8,'0')} — submitting…`, 'share');
         this._submit(job, en2, nonce);
         this._checkBestHash(_h80, nonce); // compute full hash for best block display

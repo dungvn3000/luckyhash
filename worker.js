@@ -87,12 +87,13 @@ function sha256d(data) {
  * @param {Uint32Array} target   - 8 u32 big-endian target
  * @param {number} nonceStart
  * @param {number} batchSize
- * @returns {{ nonce: number|null, hashes: number }}
+ * @returns {{ nonces: number[], hashes: number }}
  */
 function mineBatch(header76, target, nonceStart, batchSize) {
   const full = new Uint8Array(80);
   full.set(header76, 0);
   const dv = new DataView(full.buffer);
+  const nonces = [];
 
   for (let i = 0; i < batchSize; i++) {
     const nonce = (nonceStart + i) >>> 0;
@@ -108,11 +109,11 @@ function mineBatch(header76, target, nonceStart, batchSize) {
       if (hash[j] > target[j]) { valid = false; break; }
       if (j === 7) valid = true; // all equal
     }
-    if (valid) {
-      return { nonce, hashes: i + 1 };
-    }
+    // Keep scanning after a hit: a batch can contain several shares, and the
+    // next batch skips ahead — returning early would leave a coverage gap
+    if (valid) nonces.push(nonce);
   }
-  return { nonce: null, hashes: batchSize };
+  return { nonces, hashes: batchSize };
 }
 
 // ─── Worker message handler ───────────────────────────────────────────────
