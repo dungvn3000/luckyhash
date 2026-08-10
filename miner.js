@@ -16,6 +16,10 @@
 
 'use strict';
 
+// Cache-bust token for the Web Worker script — fresh per page load so an
+// updated worker.js is never served from a stale browser cache
+const LH_CACHE_V = Math.random().toString(36).slice(2);
+
 // ═══════════════════════════════════════════════════════════════
 // Utilities
 // ═══════════════════════════════════════════════════════════════
@@ -366,7 +370,7 @@ class CPUEngine {
   }
   async init() {
     for (let i = 0; i < this.numWorkers; i++) {
-      this.workers.push(new Worker('worker.js'));
+      this.workers.push(new Worker('worker.js?v=' + LH_CACHE_V));
     }
     this.ready = true;
   }

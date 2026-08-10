@@ -525,8 +525,19 @@ document.addEventListener('alpine:init', () => {
 });
 </script>
 
-<script src="bg.js"></script>
-<script src="miner.js"></script>
+<script>
+// Cache-bust local JS: append a random version per page load so browsers
+// never serve a stale cached copy after a deploy
+(function () {
+  const v = Math.random().toString(36).slice(2);
+  for (const src of ['bg.js', 'miner.js']) {
+    const s = document.createElement('script');
+    s.src = src + '?v=' + v;
+    s.async = false; // keep execution order: bg.js → miner.js
+    document.body.appendChild(s);
+  }
+})();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 </body>
