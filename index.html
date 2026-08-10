@@ -187,6 +187,7 @@
                       x-model="settings.duration"
                       @change="save('lh_mine_duration', settings.duration)">
                  <option value="0">Unlimited</option>
+                 <option value="300">5 minutes</option>
                  <option value="900">15 minutes</option>
                  <option value="1800">30 minutes</option>
                  <option value="3600">1 hour</option>
@@ -494,8 +495,8 @@ function appData() {
       // Mobile GPUs use short-batch default: long dispatches risk the OS
       // watchdog killing the device ("GPU device lost")
       batchSize: localStorage.getItem('lh_batch_size') || (/Android|iPhone|iPad/i.test(navigator.userAgent) ? '1048576' : '4194304'),
-      // Auto-stop timer: seconds, 0 = mine until manually stopped
-      duration:  localStorage.getItem('lh_mine_duration') || '0',
+      // Auto-stop timer: seconds, 0 = mine until manually stopped (default 5m)
+      duration:  localStorage.getItem('lh_mine_duration') || '300',
     },
 
     save(key, val) { localStorage.setItem(key, val); },

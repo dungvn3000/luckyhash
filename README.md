@@ -106,7 +106,7 @@ Then open **http://localhost:8080** in Chrome 113+ or Edge 113+.
 | Worker | `luckyhash01` | Worker name shown in pool dashboard |
 | Workgroup | `64K (Light)` | GPU dispatch size — higher = more hashes/batch |
 | Batch Size | `4M nonces` (`1M` on mobile) | Nonces processed per mining cycle |
-| Mining Duration | `Unlimited` | Auto-stop timer — miner stops after the chosen time (15 min → 8 h), with an on-screen countdown |
+| Mining Duration | `5 minutes` | Auto-stop timer — miner stops after the chosen time (5 min → 8 h, or unlimited), with an on-screen countdown |
 
 All settings persist across sessions via `localStorage`.
 
