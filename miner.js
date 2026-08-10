@@ -172,6 +172,9 @@ const K = array<u32, 64>(
   0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u
 );
 fn rotr32(x: u32, n: u32) -> u32 { return (x >> n) | (x << (32u - n)); }
+fn bswap32(x: u32) -> u32 {
+  return (x << 24u) | ((x << 8u) & 0x00FF0000u) | ((x >> 8u) & 0x0000FF00u) | (x >> 24u);
+}
 fn compress(w: ptr<function, array<u32, 64>>, s: ptr<function, array<u32, 8>>) {
   for (var i = 16u; i < 64u; i++) {
     let s0 = rotr32((*w)[i-15u],  7u) ^ rotr32((*w)[i-15u], 18u) ^ ((*w)[i-15u] >>  3u);
@@ -226,12 +229,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   w3[15]=256u; // 32 * 8 bits
   compress(&w3, &s2);
 
-  // ── Compare final hash vs target (big-endian, MSW first) ───────
+  // ── Compare final hash vs target ───────────────────────────────
+  // Bitcoin interprets the digest as a LITTLE-ENDIAN uint256: its most
+  // significant word is s2[7] (trailing digest bytes), and each state word
+  // is a big-endian read of those bytes — so compare bswap(s2[7-i]) against
+  // the target's big-endian words. (ckpool: diff_from_target→le256todouble.)
+  // A big-endian compare here finds "leading-zero" hashes that the pool
+  // rejects as "Above target" — verified against a live ckpool fork.
   var below = false;
   for (var i = 0u; i < 8u; i++) {
-    if (s2[i] < inp[20u + i]) { below = true;  break; }
-    if (s2[i] > inp[20u + i]) { below = false; break; }
-    if (i == 7u)               { below = true; }
+    let hw = bswap32(s2[7u - i]);
+    if (hw < inp[20u + i]) { below = true;  break; }
+    if (hw > inp[20u + i]) { below = false; break; }
+    if (i == 7u)           { below = true; }
   }
 
   // Found a share: claim a slot (up to 4 per batch) and record the nonce
@@ -239,11 +249,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = atomicAdd(&out_buf[0], 1u);
     if (idx < 4u) { atomicStore(&out_buf[1u + idx], nonce); }
   }
-  // Best-hash display: ONE atomicMin packs (top 8 bits of hash[0]) ++
-  // (thread offset within this batch, < 2^24 after the dispatch clamp).
-  // Packing keeps quality and nonce consistent — the old two-slot version
-  // could tear when threads raced between the min and the store.
-  let key = ((s2[0] >> 24u) << 24u) | (gid.x & 0xFFFFFFu);
+  // Best-hash display: ONE atomicMin packs (top 8 bits of the LE value — the
+  // last digest byte D[31] = low byte of s2[7]) ++ (thread offset within this
+  // batch, < 2^24 after the dispatch clamp). Packing keeps quality and nonce
+  // consistent — the old two-slot version could tear when threads raced.
+  let key = ((s2[7] & 0xFFu) << 24u) | (gid.x & 0xFFFFFFu);
   atomicMin(&out_buf[5], key);
 }
 `;
@@ -335,7 +345,7 @@ class GPUEngine {
     for (let i = 0; i < foundCount; i++) nonces.push(v[1 + i]);
     return {
       nonces,
-      minPacked: v[5],   // (top8(hash[0]) << 24) | thread offset — consistent pair
+      minPacked: v[5],   // (LE-top-byte(hash) << 24) | thread offset — consistent pair
     };
   }
   destroy() {
@@ -1072,17 +1082,20 @@ class LuckyHashMiner {
       const dv = new DataView(h80.buffer);
       dv.setUint32(76, nonce, true); // little-endian nonce
       const hashHex = await sha256dBuf(h80);
+      // Display in block-hash convention (reversed digest): leading zeros =
+      // trailing digest bytes = the little-endian uint256 the pool checks.
+      const dispHex = reverseHex(hashHex);
       // Lower hex = better (more leading zeros)
-      if (hashHex < this._bestBlockHashHex) {
-        this._bestBlockHashHex = hashHex;
-        const diff = hashToDiff(hashHex);
+      if (dispHex < this._bestBlockHashHex) {
+        this._bestBlockHashHex = dispHex;
+        const diff = hashToDiff(dispHex);
         if (this._ui) {
-          this._ui.bestBlockHash      = hashHex;
+          this._ui.bestBlockHash      = dispHex;
           this._ui.bestBlockHashNonce = '0x' + nonce.toString(16).padStart(8,'0');
-          this._ui.bestBlockHashHtml  = fmtHashHtml(hashHex);
+          this._ui.bestBlockHashHtml  = fmtHashHtml(dispHex);
           this._ui.bestBlockHashDiff  = fmtDiff(diff);
         }
-        this.log(`🏆 New best hash: ${hashHex.slice(0,20)}… (diff: ${fmtDiff(diff)})`, 'info');
+        this.log(`🏆 New best hash: ${dispHex.slice(0,20)}… (diff: ${fmtDiff(diff)})`, 'info');
       }
     } catch(e) { /* ignore */ }
   }
@@ -1102,7 +1115,8 @@ class LuckyHashMiner {
       h80.set(buildHeader76(jobCopy));
       new DataView(h80.buffer).setUint32(76, nonce, true); // nonce LE
       const hashHex   = await sha256dBuf(h80);
-      const hashVal   = BigInt('0x' + hashHex);
+      // Pool compares the digest as a little-endian uint256 (trailing zeros)
+      const hashVal   = BigInt('0x' + reverseHex(hashHex));
       const targetVal = BigInt('0x' + bytesToHex(diffToTarget(this.difficulty)));
       if (hashVal <= targetVal) {
         this._submit(job, en2, nonce);

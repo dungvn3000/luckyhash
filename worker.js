@@ -27,6 +27,10 @@ const W = new Uint32Array(64);
 
 function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }
 
+function bswap32(x) {
+  return ((x << 24) | ((x << 8) & 0x00FF0000) | ((x >>> 8) & 0x0000FF00) | (x >>> 24)) >>> 0;
+}
+
 /**
  * SHA-256 hash of arbitrary bytes → Uint32Array(8) in big-endian
  * Optimized: reuses W array, avoids allocations in hot path.
@@ -102,11 +106,15 @@ function mineBatch(header76, target, nonceStart, batchSize) {
 
     const hash = sha256d(full);
 
-    // Compare big-endian: hash[0] is most significant
-    let valid = true;
+    // Bitcoin compares the digest as a LITTLE-ENDIAN uint256: the most
+    // significant word is hash[7] (trailing digest bytes), byte-swapped to
+    // match the target's big-endian words. A big-endian compare finds
+    // "leading-zero" hashes the pool rejects as "Above target".
+    let valid = false;
     for (let j = 0; j < 8; j++) {
-      if (hash[j] < target[j]) { valid = true; break; }
-      if (hash[j] > target[j]) { valid = false; break; }
+      const h = bswap32(hash[7 - j]);
+      if (h < target[j]) { valid = true; break; }
+      if (h > target[j]) { valid = false; break; }
       if (j === 7) valid = true; // all equal
     }
     // Keep scanning after a hit: a batch can contain several shares, and the

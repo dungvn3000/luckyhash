@@ -361,7 +361,10 @@
               <div>
                 <div class="fw-semibold mb-1">Compare Hash Against Target</div>
                 <p class="text-secondary mb-0" style="font-size:0.85rem;">
-                  If <code>hash &lt; target</code> (256-bit big-endian comparison), the nonce is valid.
+                  If <code>hash &lt; target</code> the nonce is valid — the digest is compared as a
+                  <strong>little-endian</strong> 256-bit integer (Bitcoin's uint256 convention, so a valid
+                  digest has <em>trailing</em> zero bytes; the familiar leading-zero form is the
+                  byte-reversed block-hash display).
                   The target is derived from <code>nBits</code> and the pool-set difficulty.
                   At difficulty = 1, the probability of any single hash being valid is ~1/2³².
                 </p>
