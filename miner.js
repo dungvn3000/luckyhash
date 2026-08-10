@@ -1042,8 +1042,8 @@ class LuckyHashMiner {
       this.hashWindow.push({ t: Date.now(), count: hashes });
 
       for (const nonce of nonces) {
-        this.log(`⚡ NONCE FOUND! 0x${nonce.toString(16).padStart(8,'0')} — submitting…`, 'share');
-        this._submit(job, en2, nonce);
+        this.log(`⚡ NONCE FOUND! 0x${nonce.toString(16).padStart(8,'0')} — verifying…`, 'share');
+        this._verifyAndSubmit(job, en2, nonce); // async sanity check, then submit
         this._checkBestHash(_h80, nonce); // compute full hash for best block display
       }
 
@@ -1085,6 +1085,34 @@ class LuckyHashMiner {
         this.log(`🏆 New best hash: ${hashHex.slice(0,20)}… (diff: ${fmtDiff(diff)})`, 'info');
       }
     } catch(e) { /* ignore */ }
+  }
+
+  // ── Verify share locally before submitting ───────────────────
+  // The batch was mined against the difficulty known at dispatch time.
+  // If the pool raised difficulty mid-flight (vardiff), the share meets
+  // the old target but not the current one — submitting it would earn a
+  // guaranteed "Above target" rejection. Shares are rare, so re-hashing
+  // costs nothing and filters those out.
+  async _verifyAndSubmit(job, en2, nonce) {
+    try {
+      // job.merkleRoot may have been recomputed for a newer en2 since the
+      // batch ran — rebuild a header copy with THIS share's en2 instead
+      const jobCopy = { ...job, merkleRoot: buildMerkleRoot(job, this.extranonce1, en2) };
+      const h80 = new Uint8Array(80);
+      h80.set(buildHeader76(jobCopy));
+      new DataView(h80.buffer).setUint32(76, nonce, true); // nonce LE
+      const hashHex   = await sha256dBuf(h80);
+      const hashVal   = BigInt('0x' + hashHex);
+      const targetVal = BigInt('0x' + bytesToHex(diffToTarget(this.difficulty)));
+      if (hashVal <= targetVal) {
+        this._submit(job, en2, nonce);
+      } else {
+        this.log('⚠️ Share dropped: difficulty changed mid-batch (would be rejected "Above target").', 'warn');
+      }
+    } catch {
+      // A verification glitch must not lose a valid share — submit anyway
+      this._submit(job, en2, nonce);
+    }
   }
 
   // ── Submit share ──────────────────────────────────────────────
