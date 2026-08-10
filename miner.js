@@ -589,7 +589,7 @@ class LuckyHashMiner {
     const s      = this._ui?.settings || {};
     const url    = s.proxyUrl  || document.getElementById('proxy-url').value.trim();
     const addr   = s.address   || document.getElementById('btc-address').value.trim();
-    const worker = s.worker    || document.getElementById('worker-name').value.trim() || 'webgpu01';
+    const worker = s.worker    || document.getElementById('worker-name').value.trim() || 'luckyhash01';
 
     if (!addr) { this.log('❌ Please enter your BTC address', 'error'); return; }
     if (!url)  { this.log('❌ Please enter the proxy WebSocket URL', 'error'); return; }
@@ -922,7 +922,7 @@ class LuckyHashMiner {
     if (!this.stratum) return;
     const s     = this._ui?.settings || {};
     const addr  = s.address || document.getElementById('btc-address').value.trim();
-    const wname = s.worker  || document.getElementById('worker-name').value.trim() || 'webgpu01';
+    const wname = s.worker  || document.getElementById('worker-name').value.trim() || 'luckyhash01';
     const id    = this.stratum.send('mining.submit', [
       `${addr}.${wname}`,
       job.jobId, en2,

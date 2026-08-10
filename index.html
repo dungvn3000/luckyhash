@@ -145,7 +145,7 @@
               <div class="col">
                 <label class="form-label lh-label" for="worker-name">Worker</label>
                 <input id="worker-name" type="text" class="form-control lh-input"
-                       placeholder="webgpu01"
+                       placeholder="luckyhash01"
                        x-model.lazy="settings.worker"
                        @change="save('lh_worker_name', settings.worker)" />
               </div>
@@ -446,7 +446,7 @@ function appData() {
     settings: {
       proxyUrl:  localStorage.getItem('lh_proxy_url')  || 'wss://ws.luckyhash.dev',
       address:   localStorage.getItem('lh_btc_address')|| '',
-      worker:    localStorage.getItem('lh_worker_name')|| 'webgpu01',
+      worker:    localStorage.getItem('lh_worker_name')|| 'luckyhash01',
       threads:   localStorage.getItem('lh_threads')    || '65536',
       batchSize: localStorage.getItem('lh_batch_size') || '4194304',
     },

@@ -73,7 +73,7 @@ Then open **http://localhost:8080** in Chrome 113+ or Edge 113+.
 ### 3. Configure & mine
 
 1. Enter your **BTC address** (bc1q… or 1…)
-2. Set **Worker name** (optional, default: `webgpu01`)
+2. Set **Worker name** (optional, default: `luckyhash01`)
 3. Set **Proxy URL** (default: `wss://ws.luckyhash.dev`)
 4. Click **Start Mining** 🚀
 
@@ -98,7 +98,7 @@ Then open **http://localhost:8080** in Chrome 113+ or Edge 113+.
 |---------|---------|-------------|
 | Proxy URL | `wss://ws.luckyhash.dev` | WebSocket address of luckyhash_proxy |
 | BTC Address | — | Your Bitcoin receiving address |
-| Worker | `webgpu01` | Worker name shown in pool dashboard |
+| Worker | `luckyhash01` | Worker name shown in pool dashboard |
 | Workgroup | `64K (Light)` | GPU dispatch size — higher = more hashes/batch |
 | Batch Size | `4M nonces` | Nonces processed per mining cycle |
 
