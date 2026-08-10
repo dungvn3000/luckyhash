@@ -231,13 +231,15 @@
           </div>
           <div class="card-body p-2" style="height:180px; position:relative;">
             <canvas id="hashrate-chart" style="width:100%;height:100%;"></canvas>
-            <div class="lh-chart-overlay d-flex align-items-center justify-content-center"
-                 id="chart-overlay" x-show="!running">
-              <div class="text-center text-muted">
-                <i class="bi bi-play-circle fs-2 d-block mb-1"></i>
-                <small>Start mining to see hashrate</small>
+            <template x-if="!running">
+              <div class="lh-chart-overlay d-flex align-items-center justify-content-center"
+                   id="chart-overlay">
+                <div class="text-center text-muted">
+                  <i class="bi bi-play-circle fs-2 d-block mb-1"></i>
+                  <small>Start mining to see hashrate</small>
+                </div>
               </div>
-            </div>
+            </template>
           </div>
         </div>
 
@@ -397,6 +399,7 @@
       <a href="https://tadu.cloud"      target="_blank" rel="noopener" class="lh-friend-link">tadu.cloud</a>
       <a href="https://sha256.vn"       target="_blank" rel="noopener" class="lh-friend-link">sha256.vn</a>
       <a href="https://randomx.vn"      target="_blank" rel="noopener" class="lh-friend-link">randomx.vn</a>
+      <a href="https://nanorandom.dev"   target="_blank" rel="noopener" class="lh-friend-link">nanorandom.dev</a>
       <a href="https://btclottery.dev"  target="_blank" rel="noopener" class="lh-friend-link">btclottery.dev</a>
     </div>
     <div class="d-flex align-items-center justify-content-center gap-3 flex-wrap">
