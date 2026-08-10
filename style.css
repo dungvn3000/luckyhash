@@ -239,3 +239,21 @@ body { font-family: 'Outfit', sans-serif; background: var(--lh-bg); }
   color: #f59e0b;
   letter-spacing: 0.04em;
 }
+
+/* ── Friend project links ─────────────────────────────────────── */
+.lh-friend-link {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #334155;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+  padding: 2px 10px;
+  text-decoration: none;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.lh-friend-link:hover {
+  color: #4f8fff;
+  border-color: rgba(79,143,255,0.35);
+  background: rgba(79,143,255,0.08);
+}
