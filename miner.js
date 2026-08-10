@@ -675,15 +675,26 @@ class LuckyHashMiner {
   // ── Switch engine hot (while running) ────────────────────────
 
   async switchEngine(target) {
-    if (!this.running) return;
-    if (target === this.engine) return;
+    if (target === this.engine && this.running) return;
     if (target === 'gpu' && !navigator.gpu) {
       this.log('❌ WebGPU not supported in this browser', 'error'); return;
     }
 
+    // Save preference always (applies immediately if mining, or on next start)
+    localStorage.setItem('lh_engine_pref', target);
+
+    if (!this.running) {
+      // Not mining yet — just update the badge so user sees selection
+      this.engine = target;
+      this._updateEngine(target === 'gpu'
+        ? 'gpu'
+        : 'cpu');
+      return;
+    }
+
     this.log(`🔄 Switching to ${target === 'gpu' ? 'WebGPU' : 'CPU'}…`, 'info');
     const prev = this.engine;
-    this.engine = target; // _loop reads this every iteration
+    this.engine = target;
 
     try {
       if (target === 'gpu') {
@@ -697,11 +708,9 @@ class LuckyHashMiner {
         if (prev === 'gpu') this.gpu.destroy();
         this.log(`✅ Switched to CPU ×${this.cpu.numWorkers}`, 'success');
       }
-      localStorage.setItem('lh_engine_pref', target);
-      // reset best-hash tracking since engine change resets hash window
       this._bestHash0 = 0xFFFFFFFF;
     } catch(e) {
-      this.engine = prev; // rollback
+      this.engine = prev;
       this._updateEngine(prev);
       this.log(`❌ Engine switch failed: ${e.message}`, 'error');
     }
