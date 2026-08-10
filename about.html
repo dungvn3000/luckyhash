@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Primary SEO -->
+  <title>How It Works – LuckyHash WebGPU Solo Bitcoin Miner</title>
+  <meta name="description" content="Learn how LuckyHash mines Bitcoin solo in the browser: WebGPU SHA256d compute shaders, Stratum JSON-RPC protocol, CPU Web Worker fallback, and step-by-step block header construction." />
+  <meta name="keywords" content="WebGPU bitcoin mining, SHA256d shader, stratum protocol, solo mining explained, browser miner, WGSL compute" />
+  <meta name="author" content="LuckyHash" />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://luckyhash.dev/about.html" />
+
+  <!-- Open Graph -->
+  <meta property="og:type"        content="article" />
+  <meta property="og:url"         content="https://luckyhash.dev/about.html" />
+  <meta property="og:site_name"   content="LuckyHash" />
+  <meta property="og:title"       content="How LuckyHash Works – WebGPU Solo Bitcoin Miner" />
+  <meta property="og:description" content="WebGPU SHA256d compute shaders, Stratum JSON-RPC, CPU fallback — a complete technical breakdown of browser-based solo Bitcoin mining." />
+  <meta property="og:image"       content="https://luckyhash.dev/og-image.png" />
+  <meta property="og:image:width"  content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:locale"      content="en_US" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card"        content="summary_large_image" />
+  <meta name="twitter:title"       content="How LuckyHash Works – WebGPU Solo Bitcoin Miner" />
+  <meta name="twitter:description" content="WebGPU SHA256d compute shaders, Stratum protocol, CPU fallback — browser-based solo Bitcoin mining explained." />
+  <meta name="twitter:image"       content="https://luckyhash.dev/og-image.png" />
+
+  <!-- Structured Data (JSON-LD) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "How LuckyHash Works – WebGPU Solo Bitcoin Miner",
+    "description": "Technical explanation of browser-based solo Bitcoin mining using WebGPU compute shaders and the Stratum protocol.",
+    "url": "https://luckyhash.dev/about.html",
+    "author": { "@type": "Organization", "name": "LuckyHash" },
+    "publisher": { "@type": "Organization", "name": "LuckyHash", "url": "https://luckyhash.dev" },
+    "mainEntity": {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "How is solo mining different from pool mining?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Pool mining shares hash power and distributes small but frequent rewards. Solo mining means you mine alone — very low probability but you keep the full block reward (~3.125 BTC) if you win." } },
+        { "@type": "Question", "name": "Which browsers support WebGPU?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Chrome 113+, Edge 113+, Opera 99+, Safari 18+ (macOS 14+). Firefox does not yet support WebGPU in production. LuckyHash automatically falls back to CPU mode if WebGPU is unavailable." } },
+        { "@type": "Question", "name": "What does luckyhash_proxy do?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Browsers cannot open raw TCP connections to Bitcoin pools. luckyhash_proxy runs a WebSocket server (port 3030) and bridges it to the pool Stratum TCP server (port 3333)." } },
+        { "@type": "Question", "name": "Is my private key ever exposed?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. Mining only requires your BTC address (public) to receive rewards. Your private key is never needed or transmitted." } }
+      ]
+    }
+  }
+  </script>
+
+  <!-- Resource hints -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* About-page specific */
+    .about-hero {
+      background: linear-gradient(135deg, rgba(79,143,255,0.12), rgba(168,85,247,0.08));
+      border: 1px solid rgba(79,143,255,0.18);
+      border-radius: 20px;
+      padding: 48px 40px;
+    }
+    .section-title {
+      font-size: 1.1rem; font-weight: 700; letter-spacing: 0.5px;
+      color: #4f8fff; text-transform: uppercase; margin-bottom: 20px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .section-title::after {
+      content: ''; flex: 1; height: 1px;
+      background: linear-gradient(90deg, rgba(79,143,255,0.4), transparent);
+    }
+    .flow-step {
+      position: relative;
+      padding: 20px 24px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(79,143,255,0.15);
+      border-radius: 14px;
+      transition: border-color 0.25s, transform 0.25s;
+    }
+    .flow-step:hover {
+      border-color: rgba(79,143,255,0.4);
+      transform: translateY(-2px);
+    }
+    .flow-num {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: linear-gradient(135deg, #4f8fff, #a855f7);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 0.85rem; color: #fff;
+      flex-shrink: 0;
+    }
+    .flow-arrow {
+      text-align: center; color: rgba(79,143,255,0.5);
+      font-size: 1.4rem; margin: 4px 0;
+    }
+    .tech-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 999px; font-size: 0.78rem;
+      font-weight: 600; border: 1px solid;
+    }
+    .tech-gpu  { color: #4f8fff; border-color: rgba(79,143,255,0.35); background: rgba(79,143,255,0.1); }
+    .tech-cpu  { color: #22d3a3; border-color: rgba(34,211,163,0.35); background: rgba(34,211,163,0.1); }
+    .tech-ws   { color: #f59e0b; border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.1); }
+    .tech-btc  { color: #f97316; border-color: rgba(249,115,22,0.35); background: rgba(249,115,22,0.1); }
+    .code-block {
+      background: rgba(0,0,0,0.5); border: 1px solid rgba(79,143,255,0.2);
+      border-radius: 12px; padding: 20px 24px;
+      font-family: 'JetBrains Mono', monospace; font-size: 0.78rem;
+      line-height: 1.8; color: #94a3b8;
+    }
+    .code-block .kw  { color: #818cf8; }
+    .code-block .fn  { color: #22d3a3; }
+    .code-block .cm  { color: #475569; font-style: italic; }
+    .code-block .str { color: #f59e0b; }
+    .faq-item {
+      border: 1px solid rgba(79,143,255,0.12);
+      border-radius: 14px; overflow: hidden; margin-bottom: 10px;
+    }
+    .faq-q {
+      padding: 16px 20px; cursor: pointer; user-select: none;
+      font-weight: 600; font-size: 0.9rem;
+      display: flex; justify-content: space-between; align-items: center;
+      background: rgba(0,0,0,0.2);
+      transition: background 0.2s;
+    }
+    .faq-q:hover { background: rgba(79,143,255,0.08); }
+    .faq-a {
+      padding: 0 20px 16px; font-size: 0.85rem; color: #94a3b8;
+      line-height: 1.7; display: none;
+    }
+    .faq-item.open .faq-a { display: block; }
+    .faq-item.open .faq-icon { transform: rotate(180deg); }
+    .faq-icon { transition: transform 0.25s; }
+    .stat-pill {
+      background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 12px; padding: 18px; text-align: center;
+    }
+    .stat-pill-val { font-size: 1.6rem; font-weight: 800; line-height: 1; }
+    .stat-pill-lbl { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.8px; color: #4b5a7a; margin-top: 4px; }
+    .arch-diagram {
+      background: rgba(0,0,0,0.4); border: 1px solid rgba(79,143,255,0.15);
+      border-radius: 16px; padding: 28px;
+      font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      line-height: 2; color: #64748b;
+    }
+    .arch-diagram .hl-blue   { color: #4f8fff; }
+    .arch-diagram .hl-green  { color: #22d3a3; }
+    .arch-diagram .hl-orange { color: #f59e0b; }
+    .arch-diagram .hl-purple { color: #a855f7; }
+  </style>
+</head>
+<body>
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+
+<!-- Visually hidden h1 for SEO -->
+<h1 class="visually-hidden">How LuckyHash Works – WebGPU Solo Bitcoin Miner</h1>
+
+<!-- Navbar -->
+<nav class="navbar navbar-dark lh-navbar px-3 px-md-4">
+  <a href="index.html" class="d-flex align-items-center gap-3 text-decoration-none">
+    <div class="lh-btc-logo"><i class="bi bi-currency-bitcoin"></i></div>
+    <div>
+      <div class="lh-brand-name">LuckyHash</div>
+      <div class="lh-brand-tag">WebGPU Solo Miner</div>
+    </div>
+  </a>
+  <div class="d-flex gap-2">
+    <a href="index.html" class="btn btn-sm btn-outline-primary">
+      <i class="bi bi-play-fill me-1"></i>Miner
+    </a>
+    <span class="btn btn-sm btn-primary disabled opacity-100">
+      <i class="bi bi-info-circle me-1"></i>About
+    </span>
+  </div>
+</nav>
+
+<div class="container-xl py-5">
+
+  <!-- Hero -->
+  <div class="about-hero mb-5">
+    <div class="row align-items-center g-4">
+      <div class="col-lg-7">
+        <div class="d-flex gap-2 flex-wrap mb-3">
+          <span class="tech-badge tech-gpu"><i class="bi bi-gpu-card"></i>WebGPU</span>
+          <span class="tech-badge tech-cpu"><i class="bi bi-cpu-fill"></i>CPU Fallback</span>
+          <span class="tech-badge tech-ws"><i class="bi bi-lightning-fill"></i>Stratum</span>
+          <span class="tech-badge tech-btc"><i class="bi bi-currency-bitcoin"></i>Solo Mining</span>
+        </div>
+        <h1 class="fw-800 mb-3" style="font-size:2.2rem; line-height:1.2;">
+          How LuckyHash<br/>
+          <span style="background:linear-gradient(90deg,#4f8fff,#a855f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
+            works
+          </span>
+        </h1>
+        <p class="text-secondary" style="font-size:1rem; line-height:1.7; max-width:520px;">
+          LuckyHash is a solo BTC miner running entirely in the browser. It leverages
+          GPU compute power via the WebGPU API to perform millions of SHA256d hashes per second,
+          connecting directly to a Bitcoin pool via the Stratum protocol.
+        </p>
+      </div>
+      <div class="col-lg-5">
+        <div class="row g-3">
+          <div class="col-6">
+            <div class="stat-pill">
+              <div class="stat-pill-val text-primary">SHA256d</div>
+              <div class="stat-pill-lbl">Hash Algorithm</div>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="stat-pill">
+              <div class="stat-pill-val" style="color:#22d3a3;">WebGPU</div>
+              <div class="stat-pill-lbl">Compute API</div>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="stat-pill">
+              <div class="stat-pill-val" style="color:#f59e0b;">Stratum</div>
+              <div class="stat-pill-lbl">Pool Protocol</div>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="stat-pill">
+              <div class="stat-pill-val" style="color:#a855f7;">WGSL</div>
+              <div class="stat-pill-lbl">Shader Language</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4">
+
+    <!-- Left column -->
+    <div class="col-lg-7">
+
+      <!-- Architecture diagram -->
+      <div class="card lh-card mb-4">
+        <div class="card-header lh-card-header">
+          <i class="bi bi-diagram-3-fill me-2 text-primary"></i>
+          <span class="fw-semibold">System Architecture</span>
+        </div>
+        <div class="card-body">
+          <div class="arch-diagram">
+<pre class="mb-0" style="background:transparent;color:inherit;">
+┌─────────────────────────────────────────────────────┐
+│                    <span class="hl-blue">BROWSER</span>                          │
+│                                                     │
+│  ┌─────────────┐    <span class="hl-green">Stratum/WS</span>   ┌─────────────┐  │
+│  │  <span class="hl-blue">miner.js</span>   │ ◄──────────► │  <span class="hl-orange">Proxy WS</span>  │  │
+│  │             │              │   :3030     │  │
+│  │  ┌────────┐ │              └──────┬──────┘  │
+│  │  │<span class="hl-purple">WebGPU </span> │ │                     │ Stratum TCP  │
+│  │  │Compute │ │              ┌──────▼──────┐  │
+│  │  │Shader  │ │              │  <span class="hl-orange">Bitcoin</span>   │  │
+│  │  │SHA256d │ │              │  <span class="hl-orange">Pool</span>      │  │
+│  │  └────────┘ │              │  :3333      │  │
+│  │  ┌────────┐ │              └─────────────┘  │
+│  │  │<span class="hl-green">CPU     </span>│ │                                │
+│  │  │Workers │ │  (fallback when no GPU)        │
+│  │  └────────┘ │                                │
+│  └─────────────┘                                │
+└─────────────────────────────────────────────────────┘</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step by step -->
+      <div class="card lh-card mb-4">
+        <div class="card-header lh-card-header">
+          <i class="bi bi-list-ol me-2 text-warning"></i>
+          <span class="fw-semibold">Step-by-Step Mining Flow</span>
+        </div>
+        <div class="card-body">
+
+          <div class="flow-step mb-2">
+            <div class="d-flex gap-3 align-items-start">
+              <div class="flow-num">1</div>
+              <div>
+                <div class="fw-semibold mb-1">Connect via Stratum</div>
+                <p class="text-secondary mb-0" style="font-size:0.85rem;">
+                  The miner opens a WebSocket to <code>luckyhash_proxy</code>. The proxy maintains a
+                  TCP connection to the actual Bitcoin pool. The protocol uses <strong>Stratum JSON-RPC</strong>:
+                  <code>mining.subscribe</code> → <code>mining.authorize</code>.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flow-arrow">↓</div>
+
+          <div class="flow-step mb-2">
+            <div class="d-flex gap-3 align-items-start">
+              <div class="flow-num">2</div>
+              <div>
+                <div class="fw-semibold mb-1">Receive Job (<code>mining.notify</code>)</div>
+                <p class="text-secondary mb-0" style="font-size:0.85rem;">
+                  The pool sends a job containing: <code>prevHash</code>, <code>coinb1/coinb2</code>,
+                  <code>merkleBranch</code>, <code>nBits</code>, <code>nTime</code>, <code>version</code>.
+                  The miner assembles the coinbase transaction and computes the <strong>Merkle Root</strong> via SHA256d.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flow-arrow">↓</div>
+
+          <div class="flow-step mb-2">
+            <div class="d-flex gap-3 align-items-start">
+              <div class="flow-num">3</div>
+              <div>
+                <div class="fw-semibold mb-1">Build the Block Header (80 bytes)</div>
+                <p class="text-secondary mb-0" style="font-size:0.85rem;">
+                  Header is assembled from: version (4B) + prevHash (32B) + merkleRoot (32B)
+                  + nTime (4B) + nBits (4B) + <strong>nonce (4B)</strong>.
+                  The nonce is the only field that changes on every attempt.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flow-arrow">↓</div>
+
+          <div class="flow-step mb-2">
+            <div class="d-flex gap-3 align-items-start">
+              <div class="flow-num">4</div>
+              <div>
+                <div class="fw-semibold mb-1">Parallel SHA256d — GPU or CPU</div>
+                <p class="text-secondary mb-0" style="font-size:0.85rem;">
+                  <strong>WebGPU</strong>: each GPU thread tries a unique nonce — 65K–4M nonces per batch.
+                  <strong>CPU</strong>: multiple Web Worker threads split the nonce range.
+                  Formula: <code>hash = SHA256(SHA256(header_80_bytes))</code>.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flow-arrow">↓</div>
+
+          <div class="flow-step mb-2">
+            <div class="d-flex gap-3 align-items-start">
+              <div class="flow-num">5</div>
+              <div>
+                <div class="fw-semibold mb-1">Compare Hash Against Target</div>
+                <p class="text-secondary mb-0" style="font-size:0.85rem;">
+                  If <code>hash &lt; target</code> (256-bit big-endian comparison), the nonce is valid.
+                  The target is derived from <code>nBits</code> and the pool-set difficulty.
+                  At difficulty = 1, the probability of any single hash being valid is ~1/2³².
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flow-arrow">↓</div>
+
+          <div class="flow-step">
+            <div class="d-flex gap-3 align-items-start">
+              <div class="flow-num">6</div>
+              <div>
+                <div class="fw-semibold mb-1">Submit Share (<code>mining.submit</code>)</div>
+                <p class="text-secondary mb-0" style="font-size:0.85rem;">
+                  Send <code>[worker, jobId, extranonce2, nTime, nonce]</code> to the pool via WebSocket.
+                  The pool responds with <code>true</code> (accepted) or an error (rejected).
+                  If the share meets full network difficulty, it's a <strong>valid block</strong> — you win!
+                </p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- SHA256d code -->
+      <div class="card lh-card mb-4">
+        <div class="card-header lh-card-header">
+          <i class="bi bi-code-slash me-2" style="color:#a855f7;"></i>
+          <span class="fw-semibold">WGSL Shader (GPU kernel)</span>
+        </div>
+        <div class="card-body p-0">
+          <div class="code-block" style="border-radius:0 0 14px 14px;">
+<span class="cm">// Each GPU thread receives a unique nonce</span>
+<span class="kw">@compute @workgroup_size</span>(256)
+<span class="kw">fn</span> <span class="fn">main</span>(<span class="kw">@builtin</span>(global_invocation_id) gid: vec3&lt;u32&gt;) {
+  <span class="kw">let</span> nonce = inp[28] + gid.x;         <span class="cm">// nonce = base + thread_id</span>
+
+  <span class="cm">// SHA256 pass 1: 80-byte block header</span>
+  <span class="kw">var</span> s1: array&lt;u32, 8&gt; = IV;
+  <span class="fn">compress</span>(&amp;w1, &amp;s1);                   <span class="cm">// block 1: bytes 0–63</span>
+  <span class="fn">compress</span>(&amp;w2, &amp;s1);                   <span class="cm">// block 2: bytes 64–79 + padding</span>
+
+  <span class="cm">// SHA256 pass 2: hash the 32-byte result</span>
+  <span class="kw">var</span> s2: array&lt;u32, 8&gt; = IV;
+  <span class="fn">compress</span>(&amp;w3, &amp;s2);
+
+  <span class="cm">// Check: hash &lt; target?</span>
+  <span class="kw">if</span> (below) { <span class="fn">atomicStore</span>(&amp;out_buf[0], 1u); }
+}
+          </div>
+        </div>
+      </div>
+
+    </div><!-- col-lg-7 -->
+
+    <!-- Right column -->
+    <div class="col-lg-5">
+
+      <!-- WebGPU vs CPU -->
+      <div class="card lh-card mb-4">
+        <div class="card-header lh-card-header">
+          <i class="bi bi-speedometer2 me-2 text-info"></i>
+          <span class="fw-semibold">WebGPU vs CPU</span>
+        </div>
+        <div class="card-body">
+          <div class="row g-3 mb-3">
+            <div class="col-6">
+              <div class="p-3 rounded-3 text-center" style="background:rgba(79,143,255,0.08);border:1px solid rgba(79,143,255,0.2);">
+                <i class="bi bi-gpu-card fs-2 text-primary d-block mb-2"></i>
+                <div class="fw-bold">WebGPU</div>
+                <div class="text-primary fw-bold" style="font-size:1.1rem;">~10–500 MH/s</div>
+                <div class="text-secondary" style="font-size:0.73rem;">Depends on GPU</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="p-3 rounded-3 text-center" style="background:rgba(34,211,163,0.08);border:1px solid rgba(34,211,163,0.2);">
+                <i class="bi bi-cpu-fill fs-2 d-block mb-2" style="color:#22d3a3;"></i>
+                <div class="fw-bold">CPU Workers</div>
+                <div class="fw-bold" style="font-size:1.1rem;color:#22d3a3;">~100–2000 KH/s</div>
+                <div class="text-secondary" style="font-size:0.73rem;">Depends on core count</div>
+              </div>
+            </div>
+          </div>
+
+          <table class="table table-sm table-borderless mb-0" style="font-size:0.8rem;">
+            <thead>
+              <tr class="text-muted">
+                <th></th><th class="text-primary">GPU</th><th style="color:#22d3a3;">CPU</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Parallel threads</td><td class="text-primary">Thousands</td><td style="color:#22d3a3;">4–16</td></tr>
+              <tr><td>Batch/cycle</td><td class="text-primary">4M nonces</td><td style="color:#22d3a3;">Evenly split</td></tr>
+              <tr><td>Requirement</td><td class="text-primary">Chrome 113+</td><td style="color:#22d3a3;">Any browser</td></tr>
+              <tr><td>Shader</td><td class="text-primary">WGSL</td><td style="color:#22d3a3;">JavaScript</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Stratum Protocol -->
+      <div class="card lh-card mb-4">
+        <div class="card-header lh-card-header">
+          <i class="bi bi-arrow-left-right me-2 text-warning"></i>
+          <span class="fw-semibold">Stratum Protocol</span>
+        </div>
+        <div class="card-body p-0">
+          <div class="code-block" style="border-radius:0 0 14px 14px; font-size:0.72rem;">
+<span class="cm">→ Sent to pool</span>
+{ <span class="str">"method"</span>: <span class="str">"mining.subscribe"</span>,
+  <span class="str">"params"</span>: [<span class="str">"LuckyHash/1.0"</span>] }
+
+{ <span class="str">"method"</span>: <span class="str">"mining.authorize"</span>,
+  <span class="str">"params"</span>: [<span class="str">"btc_address.worker"</span>, <span class="str">"x"</span>] }
+
+{ <span class="str">"method"</span>: <span class="str">"mining.submit"</span>,
+  <span class="str">"params"</span>: [<span class="str">"worker"</span>,<span class="str">"jobId"</span>,<span class="str">"en2"</span>,<span class="str">"ntime"</span>,<span class="str">"nonce"</span>] }
+
+<span class="cm">← Received from pool</span>
+{ <span class="str">"method"</span>: <span class="str">"mining.notify"</span>,
+  <span class="str">"params"</span>: [jobId, prevHash, coinb1, coinb2,
+             merkleBranch, version, nBits, nTime] }
+
+{ <span class="str">"method"</span>: <span class="str">"mining.set_difficulty"</span>,
+  <span class="str">"params"</span>: [difficulty] }
+          </div>
+        </div>
+      </div>
+
+      <!-- FAQ -->
+      <div class="card lh-card mb-4">
+        <div class="card-header lh-card-header">
+          <i class="bi bi-question-circle-fill me-2" style="color:#f59e0b;"></i>
+          <span class="fw-semibold">FAQ</span>
+        </div>
+        <div class="card-body">
+
+          <div class="faq-item" onclick="this.classList.toggle('open')">
+            <div class="faq-q">
+              How is solo mining different from pool mining?
+              <i class="bi bi-chevron-down faq-icon text-muted"></i>
+            </div>
+            <div class="faq-a">
+              Pool mining shares hash power and distributes small but frequent rewards.
+              Solo mining: you mine alone — very low probability of success, but if you win
+              you receive the <strong>full block reward</strong> (~3.125 BTC currently).
+            </div>
+          </div>
+
+          <div class="faq-item" onclick="this.classList.toggle('open')">
+            <div class="faq-q">
+              Which browsers support WebGPU?
+              <i class="bi bi-chevron-down faq-icon text-muted"></i>
+            </div>
+            <div class="faq-a">
+              Chrome 113+, Edge 113+, Opera 99+, Safari 18+ (macOS 14+).
+              Firefox does not yet support WebGPU in production.
+              If WebGPU is unavailable, the miner automatically falls back to <strong>CPU mode</strong>.
+            </div>
+          </div>
+
+          <div class="faq-item" onclick="this.classList.toggle('open')">
+            <div class="faq-q">
+              What does luckyhash_proxy do?
+              <i class="bi bi-chevron-down faq-icon text-muted"></i>
+            </div>
+            <div class="faq-a">
+              Browsers cannot open raw TCP connections to a Bitcoin pool directly.
+              <code>luckyhash_proxy</code> runs a WebSocket server (port 3030) and bridges it
+              to the pool's Stratum TCP server (port 3333). All Stratum messages are forwarded
+              transparently through the proxy.
+            </div>
+          </div>
+
+          <div class="faq-item" onclick="this.classList.toggle('open')">
+            <div class="faq-q">
+              How does batch size affect performance?
+              <i class="bi bi-chevron-down faq-icon text-muted"></i>
+            </div>
+            <div class="faq-a">
+              A larger batch means fewer CPU↔GPU round-trips per second, which is more efficient —
+              but each batch holds the GPU longer. If the UI feels sluggish, reduce the batch size.
+              Use 1M–4M for weaker GPUs, 16M for high-end ones.
+            </div>
+          </div>
+
+          <div class="faq-item" onclick="this.classList.toggle('open')">
+            <div class="faq-q">
+              Is my private key ever exposed?
+              <i class="bi bi-chevron-down faq-icon text-muted"></i>
+            </div>
+            <div class="faq-a">
+              No. Mining only requires your <strong>BTC address</strong> (public) to receive the
+              reward — your private key is never needed. Rewards are sent directly to that address
+              if a block is successfully mined.
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Glossary -->
+      <div class="card lh-card">
+        <div class="card-header lh-card-header">
+          <i class="bi bi-book-fill me-2 text-success"></i>
+          <span class="fw-semibold">Glossary</span>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm table-borderless mb-0 lh-pool-table" style="font-size:0.8rem;">
+            <tbody>
+              <tr><td class="lh-pool-key">SHA256d</td><td class="text-secondary">Double SHA-256: SHA256(SHA256(data)) — Bitcoin's proof-of-work hash algorithm</td></tr>
+              <tr><td class="lh-pool-key">Nonce</td><td class="text-secondary">A 32-bit number iterated continuously to find a valid hash</td></tr>
+              <tr><td class="lh-pool-key">Target</td><td class="text-secondary">256-bit threshold the resulting hash must be below to be accepted</td></tr>
+              <tr><td class="lh-pool-key">Difficulty</td><td class="text-secondary">A scalar that controls how small the target is — higher = harder</td></tr>
+              <tr><td class="lh-pool-key">ExtraNonce</td><td class="text-secondary">Extra entropy injected into the coinbase to extend the nonce search space</td></tr>
+              <tr><td class="lh-pool-key">Merkle Root</td><td class="text-secondary">Aggregated hash of all transactions in the block</td></tr>
+              <tr><td class="lh-pool-key">WGSL</td><td class="text-secondary">WebGPU Shading Language — used to write GPU compute shaders</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- col-lg-5 -->
+  </div><!-- row -->
+
+  <!-- Disclaimer -->
+  <div class="mt-5 mb-4">
+    <div class="card lh-card" style="border-color: rgba(245,158,11,0.35) !important;">
+      <div class="card-header lh-card-header" style="border-color: rgba(245,158,11,0.2) !important;">
+        <i class="bi bi-exclamation-triangle-fill me-2 text-warning"></i>
+        <span class="fw-semibold text-warning">Disclaimer</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+
+          <div class="col-12 col-md-6">
+            <div class="d-flex gap-3">
+              <div class="flex-shrink-0 mt-1">
+                <i class="bi bi-dice-6 fs-4 text-danger"></i>
+              </div>
+              <div>
+                <div class="fw-semibold mb-1" style="font-size:0.9rem;">Extremely Low Probability</div>
+                <p class="text-secondary mb-0" style="font-size:0.82rem; line-height:1.6;">
+                  The odds of mining a Bitcoin block with consumer hardware are astronomically low —
+                  statistically it could take <strong>thousands of years</strong>.
+                  This is an experimental / educational tool, not a money-making application.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <div class="d-flex gap-3">
+              <div class="flex-shrink-0 mt-1">
+                <i class="bi bi-lightning-charge fs-4 text-warning"></i>
+              </div>
+              <div>
+                <div class="fw-semibold mb-1" style="font-size:0.9rem;">Power Consumption</div>
+                <p class="text-secondary mb-0" style="font-size:0.82rem; line-height:1.6;">
+                  Continuous GPU mining can heat your device and significantly increase power draw.
+                  Ensure adequate cooling and do not run at full load for extended periods.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <div class="d-flex gap-3">
+              <div class="flex-shrink-0 mt-1">
+                <i class="bi bi-graph-down-arrow fs-4 text-info"></i>
+              </div>
+              <div>
+                <div class="fw-semibold mb-1" style="font-size:0.9rem;">No Guaranteed Returns</div>
+                <p class="text-secondary mb-0" style="font-size:0.82rem; line-height:1.6;">
+                  This software does not guarantee any financial return.
+                  Results depend entirely on luck and your share of the total network hashrate
+                  (currently &gt;700 EH/s).
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <div class="d-flex gap-3">
+              <div class="flex-shrink-0 mt-1">
+                <i class="bi bi-shield-exclamation fs-4" style="color:#a855f7;"></i>
+              </div>
+              <div>
+                <div class="fw-semibold mb-1" style="font-size:0.9rem;">Legal Compliance</div>
+                <p class="text-secondary mb-0" style="font-size:0.82rem; line-height:1.6;">
+                  Users are solely responsible for complying with local laws and regulations
+                  regarding cryptocurrency mining. The authors accept no liability for any
+                  damages arising from the use of this software.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12">
+            <div class="p-3 rounded-3 text-center" style="background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.2);">
+              <p class="mb-0 text-warning" style="font-size:0.82rem;">
+                <i class="bi bi-info-circle me-1"></i>
+                This software is provided <strong>"as is"</strong> — without warranty of any kind.
+                Intended for educational, research, and WebGPU exploration purposes only.
+              </p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="text-center text-muted mb-5 pb-2" style="font-size:0.78rem;">
+    LuckyHash WebGPU Miner · Open source · Connect via
+    <a href="https://github.com/dungvn3000/luckyhash_proxy" class="text-primary" target="_blank">luckyhash_proxy</a>
+  </div>
+
+</div><!-- container -->
+
+<script src="bg.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

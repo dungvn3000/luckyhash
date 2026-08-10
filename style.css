@@ -1,0 +1,181 @@
+/* ── LuckyHash – Custom styles on top of Bootstrap 5 dark ─── */
+
+:root {
+  --lh-bg:        #080c18;
+  --lh-card-bg:   rgba(13, 18, 36, 0.88);
+  --lh-border:    rgba(80, 120, 255, 0.14);
+  --lh-border-hi: rgba(80, 120, 255, 0.3);
+  --lh-green:  #22d3a3;
+  --lh-orange: #f59e0b;
+  --lh-purple: #a855f7;
+}
+
+/* ── Fonts ───────────────────────────────────────────────────── */
+body { font-family: 'Outfit', sans-serif; background: var(--lh-bg); }
+.font-mono { font-family: 'JetBrains Mono', monospace !important; }
+
+/* ── Background canvas ───────────────────────────────────────── */
+#bg-canvas {
+  position: fixed; inset: 0; z-index: 0;
+  pointer-events: none; opacity: 0.35;
+}
+#app { position: relative; z-index: 1; }
+
+/* ── Navbar ──────────────────────────────────────────────────── */
+.lh-navbar {
+  background: rgba(8,12,24,0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--lh-border);
+  padding-top: 12px; padding-bottom: 12px;
+}
+
+.lh-btc-logo {
+  width: 42px; height: 42px;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 1.4rem;
+  box-shadow: 0 0 20px rgba(245,158,11,0.45);
+  animation: btc-pulse 3s ease-in-out infinite;
+}
+@keyframes btc-pulse {
+  0%,100% { box-shadow: 0 0 18px rgba(245,158,11,0.4); }
+  50%      { box-shadow: 0 0 32px rgba(245,158,11,0.7); }
+}
+
+.lh-brand-name {
+  font-size: 1.2rem; font-weight: 800; line-height: 1.1;
+  background: linear-gradient(90deg, #f59e0b, #fff 60%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.lh-brand-tag {
+  font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 1px; color: #4b5a7a;
+}
+
+/* ── Badges ──────────────────────────────────────────────────── */
+.lh-status-badge {
+  font-size: 0.78rem; font-weight: 500; padding: 5px 10px;
+  border-radius: 999px; letter-spacing: 0.3px;
+}
+.lh-dot { font-size: 0.5rem; vertical-align: middle; }
+.lh-dot-on    { animation: blink 1.5s ease-in-out infinite; }
+.lh-dot-pulse { animation: blink 0.7s ease-in-out infinite; }
+.lh-dot-error { color: #f43f5e; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+.lh-engine-badge {
+  font-size: 0.73rem; font-weight: 600; border-radius: 999px;
+  padding: 5px 10px; letter-spacing: 0.5px;
+}
+.lh-badge-gpu { background: rgba(79,143,255,0.18); color: #4f8fff; border: 1px solid rgba(79,143,255,0.35); }
+.lh-badge-cpu { background: rgba(34,211,163,0.18); color: var(--lh-green); border: 1px solid rgba(34,211,163,0.35); }
+
+/* ── Cards ───────────────────────────────────────────────────── */
+.lh-card {
+  background: var(--lh-card-bg) !important;
+  border: 1px solid var(--lh-border) !important;
+  border-radius: 16px !important;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 4px 32px rgba(0,0,0,0.4);
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.lh-card:hover {
+  border-color: var(--lh-border-hi) !important;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.4), 0 0 20px rgba(79,143,255,0.1);
+}
+.lh-card-header {
+  background: rgba(0,0,0,0.2) !important;
+  border-bottom: 1px solid var(--lh-border) !important;
+  border-radius: 16px 16px 0 0 !important;
+  padding: 12px 16px !important;
+  font-size: 0.88rem;
+}
+
+/* ── Form inputs ─────────────────────────────────────────────── */
+.lh-label {
+  font-size: 0.73rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.7px; color: #6b7fa3;
+}
+.lh-input {
+  background: rgba(0,0,0,0.35) !important;
+  border: 1px solid var(--lh-border) !important;
+  color: #e8edf8 !important;
+  font-size: 0.85rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.lh-input:focus {
+  border-color: #4f8fff !important;
+  box-shadow: 0 0 0 3px rgba(79,143,255,0.15) !important;
+  background: rgba(0,0,0,0.5) !important;
+  color: #e8edf8 !important;
+}
+.lh-input option { background: #0f1626; }
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.btn-primary  { box-shadow: 0 4px 16px rgba(79,143,255,0.3); }
+.btn-primary:hover  { box-shadow: 0 6px 24px rgba(79,143,255,0.5); transform: translateY(-1px); }
+.btn-danger   { box-shadow: 0 4px 16px rgba(244,63,94,0.3); }
+.btn-danger:hover   { box-shadow: 0 6px 24px rgba(244,63,94,0.5); transform: translateY(-1px); }
+
+.lh-clear-btn { padding: 2px 7px; font-size: 0.78rem; }
+
+/* ── Hashrate value ──────────────────────────────────────────── */
+.lh-hashrate-value {
+  font-size: 1.3rem; font-weight: 700; color: var(--lh-green);
+  text-shadow: 0 0 12px rgba(34,211,163,0.4);
+}
+
+/* ── Chart overlay ───────────────────────────────────────────── */
+.lh-chart-overlay {
+  position: absolute; inset: 0;
+  background: rgba(8,12,24,0.65);
+  border-radius: 0 0 12px 12px;
+  pointer-events: none;
+}
+
+/* ── Stat cards ──────────────────────────────────────────────── */
+.lh-stat-card {
+  background: var(--lh-card-bg) !important;
+  border: 1px solid var(--lh-border) !important;
+  border-radius: 14px !important;
+  backdrop-filter: blur(12px);
+  transition: all 0.25s;
+}
+.lh-stat-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--lh-border-hi) !important;
+}
+.lh-stat-icon { line-height: 1; }
+.lh-stat-value { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+.lh-stat-label { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: #4b5a7a; margin-top: 3px; }
+.text-purple { color: var(--lh-purple) !important; }
+
+/* ── Pool info table ─────────────────────────────────────────── */
+.lh-pool-table td { padding: 7px 16px !important; font-size: 0.8rem; }
+.lh-pool-table tr { border-bottom: 1px solid var(--lh-border); }
+.lh-pool-table tr:last-child { border-bottom: none; }
+.lh-pool-key { color: #4b5a7a; font-weight: 600; text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.5px; width: 45%; }
+.lh-pool-val { color: #4f8fff; }
+
+/* ── Log box ─────────────────────────────────────────────────── */
+.lh-log-box {
+  height: 220px; overflow-y: auto;
+  background: rgba(0,0,0,0.25);
+  border-radius: 0 0 14px 14px;
+  font-size: 0.74rem; line-height: 1.7;
+}
+.lh-log-box::-webkit-scrollbar { width: 4px; }
+.lh-log-box::-webkit-scrollbar-track { background: transparent; }
+.lh-log-box::-webkit-scrollbar-thumb { background: var(--lh-border-hi); border-radius: 2px; }
+
+.lh-log-entry {
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  animation: fadeIn 0.2s ease-out;
+}
+@keyframes fadeIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
+
+.lh-log-time { font-size: 0.7rem; flex-shrink: 0; padding-top: 1px; min-width: 60px; }
+.lh-log-welcome { font-size: 0.82rem; }
+.lh-log-welcome strong { color: #8896b3; }
