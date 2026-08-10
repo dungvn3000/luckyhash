@@ -6,7 +6,7 @@
 ![WebGPU](https://img.shields.io/badge/WebGPU-Compute%20Shader-4f8fff?logo=googlechrome&logoColor=white)
 ![Bootstrap](https://img.shields.io/badge/Bootstrap-5.3-7952b3?logo=bootstrap&logoColor=white)
 ![Alpine.js](https://img.shields.io/badge/Alpine.js-3.x-8bc0d0?logo=alpine.js&logoColor=white)
-![License](https://img.shields.io/badge/license-MIT-22d3a3)
+![License](https://img.shields.io/badge/license-Apache%202.0-22d3a3)
 
 ---
 
@@ -183,9 +183,12 @@ luckyhash/
 ## 🤝 Related
 
 - [luckyhash_proxy](https://github.com/dungvn3000/luckyhash_proxy) — WebSocket↔Stratum TCP bridge (required)
+- [tadu.cloud](https://tadu.cloud) — Developed & maintained by the Tadu team
 
 ---
 
 ## 📄 License
 
-MIT © [dungvn3000](https://github.com/dungvn3000)
+Copyright 2024 [tadu.cloud](https://tadu.cloud)
+
+Licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE) for details.
