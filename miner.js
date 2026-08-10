@@ -626,13 +626,6 @@ class LuckyHashMiner {
         if (hs > this._bestHS) {
           this._bestHS = hs;
           this._ui.bestHash = fmtHS(hs);
-          // Pulse the best-hash stat card
-          const el = document.querySelector('.lh-best-hash-val');
-          if (el) {
-            el.classList.remove('lh-best-hash-pulse');
-            void el.offsetWidth; // reflow to restart animation
-            el.classList.add('lh-best-hash-pulse');
-          }
         }
       }
       this.chart.push(hs);
