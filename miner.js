@@ -631,6 +631,11 @@ function fmtDiff(d) {
 // Main Miner Controller
 // ═══════════════════════════════════════════════════════════════
 
+// Floor for pool-assigned share difficulty. Some pools broadcast a tiny
+// starting diff (e.g. 0.001 — one share per ~4M hashes), which makes a GPU
+// submit shares non-stop and spams the pool. Enforce a sane minimum.
+const MIN_SHARE_DIFF = 100;
+
 class LuckyHashMiner {
   constructor() {
     this.gpu        = new GPUEngine();
@@ -901,11 +906,14 @@ class LuckyHashMiner {
   _onMsg(msg, addr, worker) {
     if (msg.method === 'mining.notify') { this._onNotify(msg.params); return; }
     if (msg.method === 'mining.set_difficulty') {
-      // Use the pool's difficulty as-is: targeting an easier difficulty than
-      // the pool requires makes every submitted share fail validation
-      this.difficulty = msg.params[0];
+      // Never mine below MIN_SHARE_DIFF even if the pool asks: too-easy
+      // targets turn into a submit flood the pool will just throttle/ban.
+      const poolDiff = msg.params[0];
+      this.difficulty = Math.max(poolDiff, MIN_SHARE_DIFF);
       if (this._ui) this._ui.pool.difficulty = this.difficulty.toLocaleString();
-      this.log(`📊 Difficulty → ${this.difficulty}`, 'info'); return;
+      this.log(poolDiff < MIN_SHARE_DIFF
+        ? `📊 Difficulty → ${poolDiff} (clamped to min ${MIN_SHARE_DIFF} to avoid pool spam)`
+        : `📊 Difficulty → ${this.difficulty}`, 'info'); return;
     }
     if (msg.id == null) return;
 
