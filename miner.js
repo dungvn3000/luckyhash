@@ -633,16 +633,12 @@ class LuckyHashMiner {
       if (this._ui) {
         this._ui.hashrate = fmtHS(hs);
         this._ui.totalGH  = (this.totalHashes / 1e9).toFixed(3);
-        // Update best hash (peak hashrate)
-        if (hs > this._bestHS) {
-          this._bestHS = hs;
-          this._ui.bestHash = fmtHS(hs);
-        }
       }
       this.chart.push(hs);
     }, 2000);
 
     this.log(`🔗 Connecting to ${url}…`, 'info');
+    this._setStatus('connected', 'Connecting…');
     this.stratum = new StratumClient(
       url,
       (m) => this._onMsg(m, addr, worker),
@@ -793,19 +789,19 @@ class LuckyHashMiner {
       job.merkleRoot = buildMerkleRoot(job, this.extranonce1, en2);
 
       const target32 = diffToTarget(this.difficulty);
-      let nonce = null, hashes = 0;
+      let nonce = null, hashes = 0, _h80 = null;
 
       try {
         if (this.engine === 'gpu') {
-          const h80 = new Uint8Array(80);
-          h80.set(buildHeader76(job));
-          const res  = await this.gpu.runBatch(h80, target32, nonceStart >>> 0, BATCH);
+          _h80 = new Uint8Array(80);
+          _h80.set(buildHeader76(job));
+          const res  = await this.gpu.runBatch(_h80, target32, nonceStart >>> 0, BATCH);
           nonce      = res.nonce;
           hashes     = BATCH;
           // Realtime best hash: GPU tracked the minimum hash[0] of this batch
           if (res.minHash0 < this._bestHash0) {
             this._bestHash0 = res.minHash0;
-            this._checkBestHash(h80, res.minNonce); // async, non-blocking
+            this._checkBestHash(_h80, res.minNonce); // async, non-blocking
           }
         } else {
           const h76 = buildHeader76(job);
@@ -813,6 +809,7 @@ class LuckyHashMiner {
           const res = await this.cpu.runBatch(h76, tgt, nonceStart >>> 0, BATCH);
           nonce  = res.nonce;
           hashes = res.hashes;
+          _h80   = h76; // 76 bytes; _checkBestHash pads to 80 with nonce
         }
       } catch (e) {
         this.log(`⚠️ Engine error: ${e.message}`, 'error');
@@ -826,11 +823,7 @@ class LuckyHashMiner {
       if (nonce !== null) {
         this.log(`⚡ NONCE FOUND! 0x${nonce.toString(16).padStart(8,'0')} — submitting…`, 'share');
         this._submit(job, en2, nonce);
-        // Compute actual SHA256d hash for Best Block Hash display
-        this._checkBestHash(
-          this.engine === 'gpu' ? h80 : buildHeader76(job),
-          nonce
-        );
+        this._checkBestHash(_h80, nonce); // compute full hash for best block display
       }
 
       nonceStart = (nonceStart + BATCH) >>> 0;
