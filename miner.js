@@ -411,65 +411,133 @@ class StratumClient {
 
 class HashrateChart {
   constructor(id) {
-    this.canvas  = document.getElementById(id);
-    this.ctx     = this.canvas.getContext('2d');
-    this.samples = [];
-    this.MAX     = 60;
-    this._resize();
-    window.addEventListener('resize', () => this._resize());
+    this.canvas   = document.getElementById(id);
+    this.ctx      = this.canvas.getContext('2d');
+    this.samples  = [];
+    this.MAX      = 60;
+    this._yMax    = 0;     // smoothed Y ceiling
+    this._sized   = false;
+    this._doResize();
+    window.addEventListener('resize', () => this._doResize());
   }
-  _resize() {
-    // Bug 6 fix: wrap in rAF so layout is complete before reading dimensions
+
+  _doResize() {
     requestAnimationFrame(() => {
       const r = this.canvas.parentElement.getBoundingClientRect();
-      this.canvas.width  = r.width  || 500;
-      this.canvas.height = r.height || 180;
+      if (r.width > 0 && r.height > 0) {
+        this.canvas.width  = r.width;
+        this.canvas.height = r.height;
+        this._sized = true;
+        this._draw();
+      }
     });
   }
+
+  _ensureSize() {
+    if (!this._sized || this.canvas.width === 0) {
+      const r = this.canvas.parentElement.getBoundingClientRect();
+      this.canvas.width  = r.width  || 600;
+      this.canvas.height = r.height || 180;
+      this._sized = true;
+    }
+  }
+
   push(hs) {
     this.samples.push(hs);
     if (this.samples.length > this.MAX) this.samples.shift();
     this._draw();
   }
+
   _draw() {
-    const { canvas: c, ctx, samples: s } = this;
-    const W=c.width, H=c.height;
-    ctx.clearRect(0,0,W,H);
-    if (s.length < 2) return;
-    const maxV = Math.max(...s) * 1.2 || 1;
-    const pts  = s.map((v,i) => ({
-      x: (i/(s.length-1))*W,
-      y: H - (v/maxV)*(H*0.82) - H*0.05,
-    }));
-    // fill
-    const grad = ctx.createLinearGradient(0,0,0,H);
-    grad.addColorStop(0,'rgba(34,211,163,0.28)');
-    grad.addColorStop(1,'rgba(34,211,163,0)');
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, H);
-    ctx.lineTo(pts[0].x, pts[0].y);
-    for (let i=1;i<pts.length;i++) {
-      const cx = pts[i-1].x + (pts[i].x-pts[i-1].x)*0.5;
-      ctx.bezierCurveTo(cx,pts[i-1].y,cx,pts[i].y,pts[i].x,pts[i].y);
+    this._ensureSize();
+    const { canvas: c, ctx, samples } = this;
+    const W = c.width, H = c.height;
+    if (W === 0 || H === 0) return;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Filter leading zeros so chart starts when mining actually begins
+    const s = samples[0] === 0 && samples.length > 1
+      ? samples.filter((v, i) => i === 0 || samples.slice(0, i).some(x => x > 0) || v > 0)
+      : samples;
+
+    // Smooth Y ceiling: grows instantly to fit, decays slowly
+    const rawMax = Math.max(...s, 0);
+    if (rawMax > this._yMax) {
+      this._yMax = rawMax * 1.15;        // grow: leave 15% headroom
+    } else {
+      this._yMax = this._yMax * 0.98 + rawMax * 0.02; // decay slowly
     }
-    ctx.lineTo(pts[pts.length-1].x, H);
+    const yMax = this._yMax || 1;
+
+    // Layout
+    const PAD_L = 52, PAD_R = 8, PAD_T = 10, PAD_B = 6;
+    const cW = W - PAD_L - PAD_R;
+    const cH = H - PAD_T - PAD_B;
+
+    // Grid lines + Y labels
+    const GRID = 4;
+    ctx.save();
+    for (let i = 0; i <= GRID; i++) {
+      const ratio = i / GRID;
+      const y     = PAD_T + cH - ratio * cH;
+      const val   = ratio * yMax;
+
+      // grid line
+      ctx.beginPath();
+      ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R, y);
+      ctx.strokeStyle = `rgba(255,255,255,${i === 0 ? 0.06 : 0.04})`;
+      ctx.lineWidth = 1; ctx.stroke();
+
+      // label
+      ctx.fillStyle   = 'rgba(148,163,184,0.7)';
+      ctx.font        = '10px "JetBrains Mono", monospace';
+      ctx.textAlign   = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(fmtHS(val), PAD_L - 4, y);
+    }
+    ctx.restore();
+
+    if (s.length < 2) return;
+
+    // Map points into chart area
+    const pts = s.map((v, i) => ({
+      x: PAD_L + (i / (s.length - 1)) * cW,
+      y: PAD_T + cH - (v / yMax) * cH,
+    }));
+
+    // Gradient fill
+    const grad = ctx.createLinearGradient(0, PAD_T, 0, PAD_T + cH);
+    grad.addColorStop(0, 'rgba(34,211,163,0.25)');
+    grad.addColorStop(1, 'rgba(34,211,163,0)');
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, PAD_T + cH);
+    ctx.lineTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      const cx = pts[i-1].x + (pts[i].x - pts[i-1].x) * 0.5;
+      ctx.bezierCurveTo(cx, pts[i-1].y, cx, pts[i].y, pts[i].x, pts[i].y);
+    }
+    ctx.lineTo(pts[pts.length-1].x, PAD_T + cH);
     ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-    // line
+    ctx.fillStyle = grad; ctx.fill();
+
+    // Line
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i=1;i<pts.length;i++) {
-      const cx = pts[i-1].x + (pts[i].x-pts[i-1].x)*0.5;
-      ctx.bezierCurveTo(cx,pts[i-1].y,cx,pts[i].y,pts[i].x,pts[i].y);
+    for (let i = 1; i < pts.length; i++) {
+      const cx = pts[i-1].x + (pts[i].x - pts[i-1].x) * 0.5;
+      ctx.bezierCurveTo(cx, pts[i-1].y, cx, pts[i].y, pts[i].x, pts[i].y);
     }
-    ctx.strokeStyle='#22d3a3'; ctx.lineWidth=2.5;
-    ctx.shadowColor='#22d3a3'; ctx.shadowBlur=10;
-    ctx.stroke(); ctx.shadowBlur=0;
-    const last = pts[pts.length-1];
-    ctx.beginPath(); ctx.arc(last.x,last.y,4,0,Math.PI*2);
-    ctx.fillStyle='#22d3a3'; ctx.shadowColor='#22d3a3'; ctx.shadowBlur=14;
-    ctx.fill(); ctx.shadowBlur=0;
+    ctx.strokeStyle = '#22d3a3'; ctx.lineWidth = 2;
+    ctx.shadowColor = '#22d3a3'; ctx.shadowBlur = 8;
+    ctx.stroke(); ctx.shadowBlur = 0;
+
+    // Dot at last point
+    const last = pts[pts.length - 1];
+    ctx.beginPath(); ctx.arc(last.x, last.y, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#22d3a3';
+    ctx.shadowColor = '#22d3a3'; ctx.shadowBlur = 12;
+    ctx.fill(); ctx.shadowBlur = 0;
   }
 }
 
