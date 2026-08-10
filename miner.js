@@ -479,6 +479,23 @@ function fmtUptime(sec) {
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
+// SHA256d via SubtleCrypto (async, main thread)
+async function sha256dBuf(bytes) {
+  const h1 = await crypto.subtle.digest('SHA-256', bytes);
+  const h2 = await crypto.subtle.digest('SHA-256', h1);
+  return Array.from(new Uint8Array(h2)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// Format hash HTML: leading zeros dim, rest bright, mid truncated for display
+function fmtHashHtml(hex) {
+  if (!hex || hex === '—') return '—';
+  let z = 0;
+  while (z < hex.length && hex[z] === '0') z++;
+  const zeros = hex.slice(0, z);
+  const rest  = hex.slice(z);
+  return `<span class="lh-hash-zeros">${zeros}</span><span class="lh-hash-rest">${rest}</span>`;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Main Miner Controller
 // ═══════════════════════════════════════════════════════════════
@@ -587,10 +604,12 @@ class LuckyHashMiner {
       this._ui.totalGH  = '0';
       this._ui.hashrate = '0 H/s';
       this._ui.bestHash = '—';
+      this._ui.bestBlockHash     = '—';
+      this._ui.bestBlockHashNonce = '—';
+      this._ui.bestBlockHashHtml  = '—';
     }
     this._bestHS = 0;
-
-    this._setStatus('connected', 'Connecting…');
+    this._bestBlockHashHex = 'f'.repeat(64);
     this.chart = new HashrateChart('hashrate-chart');
 
     this._uptimeTmr = setInterval(() => {
@@ -796,12 +815,41 @@ class LuckyHashMiner {
       if (nonce !== null) {
         this.log(`⚡ NONCE FOUND! 0x${nonce.toString(16).padStart(8,'0')} — submitting…`, 'share');
         this._submit(job, en2, nonce);
+        // Compute actual SHA256d hash for Best Block Hash display
+        this._checkBestHash(
+          this.engine === 'gpu' ? h80 : buildHeader76(job),
+          nonce
+        );
       }
 
       nonceStart = (nonceStart + BATCH) >>> 0;
       await new Promise(r => setTimeout(r, 0));
     }
     this._miningActive = false;
+  }
+
+  // ── Best Block Hash ───────────────────────────────────────────
+
+  async _checkBestHash(headerBytes, nonce) {
+    try {
+      // Build full 80-byte header with this nonce (LE at bytes 76-79)
+      const h80 = new Uint8Array(80);
+      const src = headerBytes instanceof Uint8Array ? headerBytes : new Uint8Array(headerBytes.buffer || headerBytes);
+      h80.set(src.slice(0, 76));
+      const dv = new DataView(h80.buffer);
+      dv.setUint32(76, nonce, true); // little-endian nonce
+      const hashHex = await sha256dBuf(h80);
+      // Lower hex = better (more leading zeros)
+      if (hashHex < this._bestBlockHashHex) {
+        this._bestBlockHashHex = hashHex;
+        if (this._ui) {
+          this._ui.bestBlockHash      = hashHex;
+          this._ui.bestBlockHashNonce = '0x' + nonce.toString(16).padStart(8,'0');
+          this._ui.bestBlockHashHtml  = fmtHashHtml(hashHex);
+        }
+        this.log(`🏆 New best hash: ${hashHex.slice(0,20)}…`, 'info');
+      }
+    } catch(e) { /* ignore */ }
   }
 
   // ── Submit share ──────────────────────────────────────────────

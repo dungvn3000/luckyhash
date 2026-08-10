@@ -269,6 +269,23 @@
           </div>
         </div>
 
+        <!-- Best Block Hash card -->
+        <div class="card lh-card mb-3" x-cloak x-show="bestBlockHash !== '—'">
+          <div class="card-header lh-card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+              <i class="bi bi-shield-lock-fill me-2" style="color:#22d3a3;"></i>
+              <span class="fw-semibold">Best Block Hash</span>
+              <span class="badge ms-2" style="background:rgba(34,211,163,0.12);color:#22d3a3;font-size:0.65rem;border:1px solid rgba(34,211,163,0.25);">
+                Most leading zeros this session
+              </span>
+            </div>
+            <span class="text-muted font-mono" style="font-size:0.72rem;" x-text="'nonce: ' + bestBlockHashNonce"></span>
+          </div>
+          <div class="card-body py-2 px-3">
+            <div class="lh-block-hash-display font-mono" x-html="bestBlockHashHtml">&mdash;</div>
+          </div>
+        </div>
+
         <!-- Pool info + Log row -->
         <div class="row g-3">
 
@@ -390,6 +407,9 @@ function appData() {
     statusText:   'Disconnected',
     hashrate:     '0 H/s',
     bestHash:     '—',
+    bestBlockHash:      '—',
+    bestBlockHashNonce: '—',
+    bestBlockHashHtml:  '—',
     accepted:     0,
     rejected:     0,
     uptime:       '00:00:00',
