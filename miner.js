@@ -594,7 +594,10 @@ class LuckyHashMiner {
     if (!addr) { this.log('❌ Please enter your BTC address', 'error'); return; }
     if (!url)  { this.log('❌ Please enter the proxy WebSocket URL', 'error'); return; }
 
-    if (navigator.gpu) {
+    // Respect saved engine preference; default GPU if available
+    const pref = localStorage.getItem('lh_engine_pref') || (navigator.gpu ? 'gpu' : 'cpu');
+
+    if (pref === 'gpu' && navigator.gpu) {
       this.log('🖥️ Initializing WebGPU...', 'info');
       try {
         await this.gpu.init();
@@ -607,7 +610,7 @@ class LuckyHashMiner {
         this.engine = 'cpu';
       }
     } else {
-      this.log('⚠️ WebGPU not available — using CPU fallback.', 'warn');
+      if (pref === 'gpu') this.log('⚠️ WebGPU not available — using CPU fallback.', 'warn');
       this.engine = 'cpu';
     }
 
@@ -667,6 +670,41 @@ class LuckyHashMiner {
       (e) => this._onErr(e),
     );
     this.stratum.connect();
+  }
+
+  // ── Switch engine hot (while running) ────────────────────────
+
+  async switchEngine(target) {
+    if (!this.running) return;
+    if (target === this.engine) return;
+    if (target === 'gpu' && !navigator.gpu) {
+      this.log('❌ WebGPU not supported in this browser', 'error'); return;
+    }
+
+    this.log(`🔄 Switching to ${target === 'gpu' ? 'WebGPU' : 'CPU'}…`, 'info');
+    const prev = this.engine;
+    this.engine = target; // _loop reads this every iteration
+
+    try {
+      if (target === 'gpu') {
+        await this.gpu.init();
+        this._updateEngine('gpu');
+        if (prev === 'cpu') this.cpu.destroy();
+        this.log('✅ Switched to WebGPU', 'success');
+      } else {
+        await this.cpu.init();
+        this._updateEngine('cpu');
+        if (prev === 'gpu') this.gpu.destroy();
+        this.log(`✅ Switched to CPU ×${this.cpu.numWorkers}`, 'success');
+      }
+      localStorage.setItem('lh_engine_pref', target);
+      // reset best-hash tracking since engine change resets hash window
+      this._bestHash0 = 0xFFFFFFFF;
+    } catch(e) {
+      this.engine = prev; // rollback
+      this._updateEngine(prev);
+      this.log(`❌ Engine switch failed: ${e.message}`, 'error');
+    }
   }
 
   // ── Stop ──────────────────────────────────────────────────────

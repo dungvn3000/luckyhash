@@ -173,6 +173,27 @@
               </select>
             </div>
 
+            <!-- Engine switcher (visible while mining) -->
+            <div class="mb-3" x-show="running" x-cloak>
+              <label class="form-label lh-label">Mining Engine</label>
+              <div class="btn-group w-100" role="group">
+                <button type="button"
+                        class="btn btn-sm fw-semibold"
+                        :class="engineLabel.startsWith('WebGPU') ? 'btn-warning' : 'btn-outline-warning'"
+                        :disabled="!hasGPU"
+                        @click="window.miner.switchEngine('gpu')">
+                  <i class="bi bi-gpu-card me-1"></i>WebGPU
+                  <span x-show="!hasGPU" class="ms-1" style="font-size:0.7rem;opacity:0.6;">(N/A)</span>
+                </button>
+                <button type="button"
+                        class="btn btn-sm fw-semibold"
+                        :class="engineLabel.startsWith('CPU') ? 'btn-info' : 'btn-outline-info'"
+                        @click="window.miner.switchEngine('cpu')">
+                  <i class="bi bi-cpu-fill me-1"></i>CPU
+                </button>
+              </div>
+            </div>
+
             <!-- Start / Stop -->
             <div class="d-grid gap-2">
               <button class="btn btn-primary btn-lg fw-semibold"
@@ -411,6 +432,7 @@ function appData() {
     rejected:     0,
     uptime:       '00:00:00',
     totalGH:      '0',
+    hasGPU:       hasGPU,
     engineLabel:  hasGPU ? 'WebGPU' : `CPU ×${cores}`,
     engineClass:  hasGPU ? 'lh-badge-gpu' : 'lh-badge-cpu',
     engineIcon:   hasGPU ? 'bi-gpu-card'  : 'bi-cpu-fill',
