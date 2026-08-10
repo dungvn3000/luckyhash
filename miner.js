@@ -232,6 +232,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     atomicStore(&out_buf[0], 1u);
     atomicStore(&out_buf[1], nonce);
   }
+  // Track minimum hash[0] across all threads for realtime best-hash display
+  // slot[2] = min hash[0] seen, slot[3] = nonce for that min
+  let prev = atomicMin(&out_buf[2], s2[0]);
+  if (s2[0] < prev) {
+    atomicStore(&out_buf[3], nonce);
+  }
 }
 `;
 
@@ -254,8 +260,8 @@ class GPUEngine {
 
     // 29 u32 = 116 bytes; pad to 256 for alignment
     this.inputBuf  = this.device.createBuffer({ size: 256, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    this.resultBuf = this.device.createBuffer({ size: 8,   usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
-    this.readBuf   = this.device.createBuffer({ size: 8,   usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    this.resultBuf = this.device.createBuffer({ size: 16,  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    this.readBuf   = this.device.createBuffer({ size: 16,  usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
 
     // Capture shader compile errors explicitly
     this.device.pushErrorScope('validation');
@@ -288,7 +294,8 @@ class GPUEngine {
     data[28] = nonceStart >>> 0;
 
     this.device.queue.writeBuffer(this.inputBuf,  0, data);
-    this.device.queue.writeBuffer(this.resultBuf, 0, new Uint32Array([0, 0]));
+    // Reset: found=0, nonce=0, minHash0=0xFFFFFFFF, minNonce=0
+    this.device.queue.writeBuffer(this.resultBuf, 0, new Uint32Array([0, 0, 0xFFFFFFFF, 0]));
 
     const enc  = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
@@ -296,13 +303,16 @@ class GPUEngine {
     pass.setBindGroup(0, this.bindGroup);
     pass.dispatchWorkgroups(Math.ceil(batchSize / 256));
     pass.end();
-    enc.copyBufferToBuffer(this.resultBuf, 0, this.readBuf, 0, 8);
+    enc.copyBufferToBuffer(this.resultBuf, 0, this.readBuf, 0, 16);
     this.device.queue.submit([enc.finish()]);
     await this.readBuf.mapAsync(GPUMapMode.READ);
-    const v = new Uint32Array(this.readBuf.getMappedRange());
-    const found = v[0], nonce = v[1];
+    const v     = new Uint32Array(this.readBuf.getMappedRange().slice(0));
     this.readBuf.unmap();
-    return found ? nonce : null;
+    return {
+      nonce:    v[0] ? v[1] : null,
+      minHash0: v[2],          // best hash[0] in this batch
+      minNonce: v[3],          // nonce that produced it
+    };
   }
   destroy() {
     this.uniformBuf?.destroy(); this.resultBuf?.destroy(); this.readBuf?.destroy();
@@ -610,6 +620,7 @@ class LuckyHashMiner {
     }
     this._bestHS = 0;
     this._bestBlockHashHex = 'f'.repeat(64);
+    this._bestHash0        = 0xFFFFFFFF; // fast uint32 pre-check
     this.chart = new HashrateChart('hashrate-chart');
 
     this._uptimeTmr = setInterval(() => {
@@ -788,8 +799,14 @@ class LuckyHashMiner {
         if (this.engine === 'gpu') {
           const h80 = new Uint8Array(80);
           h80.set(buildHeader76(job));
-          nonce  = await this.gpu.runBatch(h80, target32, nonceStart >>> 0, BATCH);
-          hashes = BATCH;
+          const res  = await this.gpu.runBatch(h80, target32, nonceStart >>> 0, BATCH);
+          nonce      = res.nonce;
+          hashes     = BATCH;
+          // Realtime best hash: GPU tracked the minimum hash[0] of this batch
+          if (res.minHash0 < this._bestHash0) {
+            this._bestHash0 = res.minHash0;
+            this._checkBestHash(h80, res.minNonce); // async, non-blocking
+          }
         } else {
           const h76 = buildHeader76(job);
           const tgt = targetToU32(target32);
