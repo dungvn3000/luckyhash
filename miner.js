@@ -512,7 +512,7 @@ class LuckyHashMiner {
 
     this.extranonce1 = '';
     this.extranonce2Size = 4;
-    this.difficulty  = 1;
+    this.difficulty  = 1000;
     this.currentJob  = null;
     this._en2Counter = 0;
     this.pendingSubmits = new Map();
@@ -691,9 +691,10 @@ class LuckyHashMiner {
   _onMsg(msg, addr, worker) {
     if (msg.method === 'mining.notify') { this._onNotify(msg.params); return; }
     if (msg.method === 'mining.set_difficulty') {
-      this.difficulty = msg.params[0];
+      // Cap difficulty at 1000 so target stays reachable in-browser
+      this.difficulty = Math.min(msg.params[0], 1000);
       if (this._ui) this._ui.pool.difficulty = this.difficulty.toLocaleString();
-      this.log(`📊 Difficulty → ${this.difficulty}`, 'info'); return;
+      this.log(`📊 Difficulty → ${this.difficulty} (pool sent ${msg.params[0]})`, 'info'); return;
     }
     if (msg.id == null) return;
 
