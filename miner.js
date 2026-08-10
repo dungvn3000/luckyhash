@@ -646,6 +646,8 @@ class LuckyHashMiner {
     this._jobChanged   = false;
     this._uptimeTmr    = null;
     this._chartTmr     = null;
+    this._durationTmr  = null;
+    this._durationLimit = 0;
     this._merkleKey    = '';
     this._bestPacked   = 0x100000000;
   }
@@ -741,9 +743,29 @@ class LuckyHashMiner {
     this._merkleKey        = '';
     this.chart = new HashrateChart('hashrate-chart');
 
+    // Mining duration option: auto-stop after the chosen number of seconds
+    // (0 / unset = unlimited). Guarded by this.running so the timer can't
+    // fire after a manual stop in the same millisecond.
+    clearTimeout(this._durationTmr);
+    this._durationLimit = parseInt(s.duration) || 0;
+    if (this._durationLimit > 0) {
+      this._durationTmr = setTimeout(() => {
+        this._durationTmr = null;
+        if (!this.running) return;
+        this.log(`⏰ Mining duration reached (${fmtUptime(this._durationLimit)}) — auto-stopping.`, 'warn');
+        this.stop();
+      }, this._durationLimit * 1000);
+      this.log(`⏰ Auto-stop scheduled in ${fmtUptime(this._durationLimit)}`, 'info');
+      if (this._ui) this._ui.remainingTime = fmtUptime(this._durationLimit);
+    }
+
     this._uptimeTmr = setInterval(() => {
       const sec = Math.floor((Date.now() - this.startTime) / 1000);
-      if (this._ui) this._ui.uptime = fmtUptime(sec);
+      if (this._ui) {
+        this._ui.uptime = fmtUptime(sec);
+        if (this._durationLimit > 0)
+          this._ui.remainingTime = fmtUptime(Math.max(0, this._durationLimit - sec));
+      }
     }, 1000);
 
     this._chartTmr = setInterval(() => {
@@ -833,11 +855,13 @@ class LuckyHashMiner {
     this.stratum?.close(); this.stratum = null;
     clearInterval(this._uptimeTmr); this._uptimeTmr = null;
     clearInterval(this._chartTmr);  this._chartTmr  = null;
+    clearTimeout(this._durationTmr); this._durationTmr = null;
+    this._durationLimit = 0;
     if (this.engine === 'gpu') this.gpu.destroy();
     else if (this.engine === 'cpu') this.cpu.destroy();
     this.engine = null; this.currentJob = null;
     this._setStatus('', 'Disconnected');
-    if (this._ui) this._ui.running = false;
+    if (this._ui) { this._ui.running = false; this._ui.remainingTime = ''; }
     this.log('⏹️ Mining stopped.', 'warn');
   }
 

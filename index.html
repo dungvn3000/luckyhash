@@ -169,7 +169,7 @@
               </div>
             </div>
 
-            <div class="mb-4">
+            <div class="mb-3">
               <label class="form-label lh-label" for="batch-size">Batch Size</label>
               <select id="batch-size" class="form-select lh-input"
                       x-model="settings.batchSize"
@@ -177,6 +177,22 @@
                  <option value="1048576">1M nonces</option>
                  <option value="4194304">4M nonces</option>
                  <option value="16777216">16M nonces</option>
+              </select>
+            </div>
+
+            <!-- Mining duration (auto-stop) -->
+            <div class="mb-4">
+              <label class="form-label lh-label" for="mine-duration">Mining Duration</label>
+              <select id="mine-duration" class="form-select lh-input"
+                      x-model="settings.duration"
+                      @change="save('lh_mine_duration', settings.duration)">
+                 <option value="0">Unlimited</option>
+                 <option value="900">15 minutes</option>
+                 <option value="1800">30 minutes</option>
+                 <option value="3600">1 hour</option>
+                 <option value="7200">2 hours</option>
+                 <option value="14400">4 hours</option>
+                 <option value="28800">8 hours</option>
               </select>
             </div>
 
@@ -213,6 +229,14 @@
                       @click="$store.miner.stop()">
                 <i class="bi bi-stop-fill me-2"></i>Stop Mining
               </button>
+            </div>
+
+            <!-- Auto-stop countdown -->
+            <div class="text-center mt-2" x-show="running && remainingTime" x-cloak>
+              <small class="text-muted">
+                <i class="bi bi-hourglass-split me-1"></i>Auto-stop in
+                <span class="font-mono" x-text="remainingTime">--:--:--</span>
+              </small>
             </div>
 
           </div><!-- card-body -->
@@ -449,6 +473,7 @@ function appData() {
     accepted:     0,
     rejected:     0,
     uptime:       '00:00:00',
+    remainingTime: '',
     totalGH:      '0',
     hasGPU:       hasGPU,
     engineLabel:  hasGPU ? 'WebGPU' : `CPU ×${cores}`,
@@ -469,6 +494,8 @@ function appData() {
       // Mobile GPUs use short-batch default: long dispatches risk the OS
       // watchdog killing the device ("GPU device lost")
       batchSize: localStorage.getItem('lh_batch_size') || (/Android|iPhone|iPad/i.test(navigator.userAgent) ? '1048576' : '4194304'),
+      // Auto-stop timer: seconds, 0 = mine until manually stopped
+      duration:  localStorage.getItem('lh_mine_duration') || '0',
     },
 
     save(key, val) { localStorage.setItem(key, val); },
