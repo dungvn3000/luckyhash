@@ -179,3 +179,17 @@ body { font-family: 'Outfit', sans-serif; background: var(--lh-bg); }
 .lh-log-time { font-size: 0.7rem; flex-shrink: 0; padding-top: 1px; min-width: 60px; }
 .lh-log-welcome { font-size: 0.82rem; }
 .lh-log-welcome strong { color: #8896b3; }
+/* ── Footer ───────────────────────────────────────────────────── */
+.lh-footer {
+  border-top: 1px solid rgba(255,255,255,0.06);
+  margin-top: 12px;
+  font-size: 0.78rem;
+}
+.lh-footer-text { color: #4b5a7a; }
+.lh-footer-sep  { color: #2a3650; }
+.lh-footer-link {
+  color: #4b5a7a;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.lh-footer-link:hover { color: #4f8fff; }
