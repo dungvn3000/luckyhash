@@ -132,7 +132,10 @@ function buildHeader76(job) {
 /** Difficulty → 32-byte big-endian target */
 function diffToTarget(diff) {
   const diff1 = BigInt('0x00000000FFFF0000000000000000000000000000000000000000000000000000');
-  const t = diff1 / BigInt(Math.max(1, Math.floor(diff)));
+  // Scale to keep fractional pool difficulties (e.g. 0.5, 3.7) accurate;
+  // flooring to an integer would yield an easier target → rejected shares
+  const scaled = BigInt(Math.max(1, Math.round(diff * 1_000_000)));
+  const t = diff1 * 1_000_000n / scaled;
   const hex = t.toString(16).padStart(64, '0');
   return hexToBytes(hex);
 }
@@ -285,6 +288,11 @@ class GPUEngine {
   }
 
   async runBatch(header80, target32, nonceStart, batchSize) {
+    // WebGPU limit: maxComputeWorkgroupsPerDimension = 65535, so a dispatch
+    // covers at most 65535 * 256 threads. Larger batches (e.g. the 16M UI
+    // option = 65536 workgroups) trigger an async validation error that
+    // silently drops the whole dispatch — fake hashrate, zero real work.
+    batchSize = Math.min(batchSize, 65535 * 256);
     // Flat layout: [header x20][target x8][nonce_start]
     const data = new Uint32Array(29);
     const hdv  = new DataView(header80.buffer, header80.byteOffset, 80);
@@ -826,10 +834,11 @@ class LuckyHashMiner {
   _onMsg(msg, addr, worker) {
     if (msg.method === 'mining.notify') { this._onNotify(msg.params); return; }
     if (msg.method === 'mining.set_difficulty') {
-      // Cap difficulty at 10000 so target stays reachable in-browser
-      this.difficulty = Math.min(msg.params[0], 10000);
+      // Use the pool's difficulty as-is: targeting an easier difficulty than
+      // the pool requires makes every submitted share fail validation
+      this.difficulty = msg.params[0];
       if (this._ui) this._ui.pool.difficulty = this.difficulty.toLocaleString();
-      this.log(`📊 Difficulty → ${this.difficulty} (pool sent ${msg.params[0]})`, 'info'); return;
+      this.log(`📊 Difficulty → ${this.difficulty}`, 'info'); return;
     }
     if (msg.id == null) return;
 
@@ -961,7 +970,15 @@ class LuckyHashMiner {
         this._checkBestHash(_h80, nonce); // compute full hash for best block display
       }
 
-      nonceStart = (nonceStart + BATCH) >>> 0;
+      // 32-bit nonce space exhausted → roll extranonce2 to get a fresh
+      // merkle root; otherwise the same space would be re-hashed forever
+      // (duplicate work + duplicate-share rejections from the pool)
+      if (nonceStart + BATCH >= 2 ** 32) {
+        this._en2Counter++;
+        nonceStart = 0;
+      } else {
+        nonceStart += BATCH;
+      }
       await new Promise(r => setTimeout(r, 0));
     }
     this._miningActive = false;
