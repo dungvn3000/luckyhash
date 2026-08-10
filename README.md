@@ -189,6 +189,6 @@ luckyhash/
 
 ## 📄 License
 
-Copyright 2024 [tadu.cloud](https://tadu.cloud)
+Copyright 2026 [tadu.cloud](https://tadu.cloud)
 
 Licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE) for details.
