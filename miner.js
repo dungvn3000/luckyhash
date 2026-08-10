@@ -586,7 +586,9 @@ class LuckyHashMiner {
       this._ui.uptime   = '00:00:00';
       this._ui.totalGH  = '0';
       this._ui.hashrate = '0 H/s';
+      this._ui.bestHash = '—';
     }
+    this._bestHS = 0;
 
     this._setStatus('connected', 'Connecting…');
     this.chart = new HashrateChart('hashrate-chart');
@@ -601,6 +603,18 @@ class LuckyHashMiner {
       if (this._ui) {
         this._ui.hashrate = fmtHS(hs);
         this._ui.totalGH  = (this.totalHashes / 1e9).toFixed(3);
+        // Update best hash (peak hashrate)
+        if (hs > this._bestHS) {
+          this._bestHS = hs;
+          this._ui.bestHash = fmtHS(hs);
+          // Pulse the best-hash stat card
+          const el = document.querySelector('.lh-best-hash-val');
+          if (el) {
+            el.classList.remove('lh-best-hash-pulse');
+            void el.offsetWidth; // reflow to restart animation
+            el.classList.add('lh-best-hash-pulse');
+          }
+        }
       }
       this.chart.push(hs);
     }, 2000);

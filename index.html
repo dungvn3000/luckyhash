@@ -201,7 +201,12 @@
               <i class="bi bi-graph-up-arrow me-2 text-warning"></i>
               <span class="fw-semibold">Hashrate</span>
             </div>
-            <span class="lh-hashrate-value font-mono" x-text="hashrate">0 H/s</span>
+            <div class="d-flex align-items-center gap-3">
+              <span class="lh-best-hash-badge" x-show="bestHash !== '—'">
+                <i class="bi bi-trophy-fill me-1"></i><span x-text="bestHash"></span>
+              </span>
+              <span class="lh-hashrate-value font-mono" x-text="hashrate">0 H/s</span>
+            </div>
           </div>
           <div class="card-body p-2" style="height:180px; position:relative;">
             <canvas id="hashrate-chart" style="width:100%;height:100%;"></canvas>
@@ -250,6 +255,15 @@
                 <div class="lh-stat-icon text-purple mb-1"><i class="bi bi-lightning-charge-fill fs-4"></i></div>
                 <div class="lh-stat-value font-mono" x-text="totalGH">0</div>
                 <div class="lh-stat-label">Total GH</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-sm col-lg">
+            <div class="card lh-stat-card text-center">
+              <div class="card-body py-3">
+                <div class="lh-stat-icon mb-1" style="color:#f59e0b;"><i class="bi bi-trophy-fill fs-4"></i></div>
+                <div class="lh-stat-value font-mono lh-best-hash-val" x-text="bestHash">&mdash;</div>
+                <div class="lh-stat-label">Best Hash</div>
               </div>
             </div>
           </div>
@@ -375,6 +389,7 @@ function appData() {
     statusClass:  '',
     statusText:   'Disconnected',
     hashrate:     '0 H/s',
+    bestHash:     '—',
     accepted:     0,
     rejected:     0,
     uptime:       '00:00:00',
