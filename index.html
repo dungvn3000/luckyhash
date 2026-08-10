@@ -146,6 +146,13 @@
                      placeholder="bc1q…"
                      x-model.lazy="settings.address"
                      @change="save('lh_btc_address', settings.address)" />
+              <div class="mt-1" x-show="settings.address.trim().length > 0" x-cloak>
+                <a :href="'https://stats-btc.heliospool.com/users/' + settings.address.trim()"
+                   target="_blank" rel="noopener"
+                   class="lh-footer-link" style="font-size:0.75rem;">
+                  <i class="bi bi-bar-chart-line me-1"></i>Check wallet stats on Helios Pool
+                </a>
+              </div>
             </div>
 
             <div class="row g-2 mb-3">
@@ -435,6 +442,11 @@
       <a href="https://btclottery.dev"  target="_blank" rel="noopener" class="lh-friend-link">btclottery.dev</a>
     </div>
     <div class="d-flex align-items-center justify-content-center gap-3 flex-wrap">
+      <a href="https://heliospool.com/" target="_blank" rel="noopener"
+         class="lh-footer-link">
+        <i class="bi bi-hdd-network me-1"></i>Helios Pool
+      </a>
+      <span class="lh-footer-sep">·</span>
       <a href="https://github.com/dungvn3000/luckyhash" target="_blank" rel="noopener"
          class="lh-footer-link">
         <i class="bi bi-github me-1"></i>GitHub
