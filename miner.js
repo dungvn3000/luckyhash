@@ -496,7 +496,7 @@ async function sha256dBuf(bytes) {
   return Array.from(new Uint8Array(h2)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
-// Format hash HTML: leading zeros dim, rest bright, mid truncated for display
+// Format hash HTML: leading zeros dim, rest bright
 function fmtHashHtml(hex) {
   if (!hex || hex === '—') return '—';
   let z = 0;
@@ -504,6 +504,25 @@ function fmtHashHtml(hex) {
   const zeros = hex.slice(0, z);
   const rest  = hex.slice(z);
   return `<span class="lh-hash-zeros">${zeros}</span><span class="lh-hash-rest">${rest}</span>`;
+}
+
+// Compute difficulty score from a hash hex string (diff1 / hashValue)
+function hashToDiff(hashHex) {
+  try {
+    const diff1 = BigInt('0x00000000FFFF0000000000000000000000000000000000000000000000000000');
+    const val   = BigInt('0x' + hashHex);
+    if (val === 0n) return Infinity;
+    return Number(diff1 * 10000n / val) / 10000; // 4 decimal precision
+  } catch { return 0; }
+}
+
+function fmtDiff(d) {
+  if (!d || d === 0)  return '—';
+  if (d >= 1e12) return (d / 1e12).toFixed(2) + ' T';
+  if (d >= 1e9)  return (d / 1e9).toFixed(2)  + ' G';
+  if (d >= 1e6)  return (d / 1e6).toFixed(2)  + ' M';
+  if (d >= 1e3)  return (d / 1e3).toFixed(2)  + ' K';
+  return d.toFixed(4);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -614,9 +633,10 @@ class LuckyHashMiner {
       this._ui.totalGH  = '0';
       this._ui.hashrate = '0 H/s';
       this._ui.bestHash = '—';
-      this._ui.bestBlockHash     = '—';
-      this._ui.bestBlockHashNonce = '—';
-      this._ui.bestBlockHashHtml  = '—';
+      this._ui.bestBlockHash      = '—';
+      this._ui.bestBlockHashNonce  = '—';
+      this._ui.bestBlockHashHtml   = '—';
+      this._ui.bestBlockHashDiff   = '—';
     }
     this._bestHS = 0;
     this._bestBlockHashHex = 'f'.repeat(64);
@@ -846,12 +866,14 @@ class LuckyHashMiner {
       // Lower hex = better (more leading zeros)
       if (hashHex < this._bestBlockHashHex) {
         this._bestBlockHashHex = hashHex;
+        const diff = hashToDiff(hashHex);
         if (this._ui) {
           this._ui.bestBlockHash      = hashHex;
           this._ui.bestBlockHashNonce = '0x' + nonce.toString(16).padStart(8,'0');
           this._ui.bestBlockHashHtml  = fmtHashHtml(hashHex);
+          this._ui.bestBlockHashDiff  = fmtDiff(diff);
         }
-        this.log(`🏆 New best hash: ${hashHex.slice(0,20)}…`, 'info');
+        this.log(`🏆 New best hash: ${hashHex.slice(0,20)}… (diff: ${fmtDiff(diff)})`, 'info');
       }
     } catch(e) { /* ignore */ }
   }

@@ -273,6 +273,11 @@
             <span class="text-muted font-mono" style="font-size:0.72rem;" x-text="'nonce: ' + bestBlockHashNonce"></span>
           </div>
           <div class="card-body py-2 px-3">
+            <!-- Best Diff badge -->
+            <div class="d-flex align-items-center gap-2 mb-1" x-show="bestBlockHashDiff !== '—'">
+              <span class="lh-diff-label">Best Diff:</span>
+              <span class="lh-diff-value font-mono" x-text="bestBlockHashDiff"></span>
+            </div>
             <div class="lh-block-hash-display font-mono" x-html="bestBlockHashHtml">&mdash;</div>
           </div>
         </div>
@@ -401,6 +406,7 @@ function appData() {
     bestBlockHash:      '—',
     bestBlockHashNonce: '—',
     bestBlockHashHtml:  '—',
+    bestBlockHashDiff:  '—',
     accepted:     0,
     rejected:     0,
     uptime:       '00:00:00',

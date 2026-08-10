@@ -225,3 +225,17 @@ body { font-family: 'Outfit', sans-serif; background: var(--lh-bg); }
 .lh-hash-rest {
   color: #22d3a3;
 }
+
+/* ── Best Diff ────────────────────────────────────────────────── */
+.lh-diff-label {
+  font-size: 0.72rem;
+  color: #4b5a7a;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.lh-diff-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f59e0b;
+  letter-spacing: 0.04em;
+}
