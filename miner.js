@@ -105,6 +105,37 @@ function sha256(data) {
 
 function sha256d(data) { return sha256(sha256(data)); }
 
+/**
+ * SHA-256 midstate: the state after compressing exactly one 64-byte block
+ * (no padding). For an 80-byte block header, the first 64 bytes are constant
+ * across all nonces of a job — the GPU then only needs to compress block 2.
+ */
+function sha256Midstate(block64) {
+  const dv = new DataView(block64.buffer, block64.byteOffset, 64);
+  const w  = new Uint32Array(64);
+  for (let i = 0; i < 16; i++) w[i] = dv.getUint32(i * 4, false);
+  for (let i = 16; i < 64; i++) {
+    const s0 = _rotr(w[i-15],7)  ^ _rotr(w[i-15],18) ^ (w[i-15]>>>3);
+    const s1 = _rotr(w[i-2], 17) ^ _rotr(w[i-2], 19) ^ (w[i-2] >>>10);
+    w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0;
+  }
+  let a=0x6a09e667,b=0xbb67ae85,c=0x3c6ef372,d=0xa54ff53a;
+  let e=0x510e527f,f=0x9b05688c,g=0x1f83d9ab,h=0x5be0cd19;
+  for (let i = 0; i < 64; i++) {
+    const S1 = ((_rotr(e,6)  ^ _rotr(e,11) ^ _rotr(e,25)));
+    const ch = (e & f) ^ (~e & g);
+    const t1 = (h + S1 + ch + SHA_K[i] + w[i]) >>> 0;
+    const S0 = ((_rotr(a,2)  ^ _rotr(a,13) ^ _rotr(a,22)));
+    const maj = (a & b) ^ (a & c) ^ (b & c);
+    const t2 = (S0 + maj) >>> 0;
+    h=g; g=f; f=e; e=(d+t1)>>>0; d=c; c=b; b=a; a=(t1+t2)>>>0;
+  }
+  return new Uint32Array([
+    (a+0x6a09e667)>>>0, (b+0xbb67ae85)>>>0, (c+0x3c6ef372)>>>0, (d+0xa54ff53a)>>>0,
+    (e+0x510e527f)>>>0, (f+0x9b05688c)>>>0, (g+0x1f83d9ab)>>>0, (h+0x5be0cd19)>>>0,
+  ]);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Bitcoin helpers
 // ═══════════════════════════════════════════════════════════════
@@ -207,16 +238,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // here so they don't redo the start of the next batch's nonce range
   if (gid.x >= inp[29]) { return; }
   let nonce    = inp[28] + gid.x;
-  let nonce_le = (nonce << 24u)
-               | ((nonce <<  8u) & 0x00FF0000u)
-               | ((nonce >>  8u) & 0x0000FF00u)
-               |  (nonce >> 24u);
+  let nonce_le = bswap32(nonce);
+  // Block 1 (bytes 0-63) is identical for every thread in the batch — the JS
+  // side passes its compression MIDSTATE (inp[30..37]) instead, so the GPU
+  // skips a full 64-round compression per nonce (~33% of the work saved).
   var s1: array<u32, 8>;
-  s1[0]=0x6a09e667u; s1[1]=0xbb67ae85u; s1[2]=0x3c6ef372u; s1[3]=0xa54ff53au;
-  s1[4]=0x510e527fu; s1[5]=0x9b05688cu; s1[6]=0x1f83d9abu; s1[7]=0x5be0cd19u;
-  var w1: array<u32, 64>;
-  for (var i = 0u; i < 16u; i++) { w1[i] = inp[i]; }
-  compress(&w1, &s1);
+  for (var i = 0u; i < 8u; i++) { s1[i] = inp[30u + i]; }
   var w2: array<u32, 64>;
   w2[0]=inp[16]; w2[1]=inp[17]; w2[2]=inp[18]; w2[3]=nonce_le;
   w2[4]=0x80000000u; w2[15]=640u; // padding bit + 80*8 bit-length
@@ -257,8 +284,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // last digest byte D[31] = low byte of s2[7]) ++ (thread offset within this
   // batch, < 2^24 after the dispatch clamp). Packing keeps quality and nonce
   // consistent — the old two-slot version could tear when threads raced.
+  // Pre-filter with a plain load: millions of threads hammering one atomic
+  // serializes the dispatch — most threads lose the race and skip the write.
   let key = ((s2[7] & 0xFFu) << 24u) | (gid.x & 0xFFFFFFu);
-  atomicMin(&out_buf[5], key);
+  if (key < atomicLoad(&out_buf[5])) {
+    atomicMin(&out_buf[5], key);
+  }
 }
 `;
 
@@ -313,20 +344,26 @@ class GPUEngine {
     this.ready = true;
   }
 
-  async runBatch(header80, target32, nonceStart, batchSize) {
+  /**
+   * @param {Uint8Array}  header80  80-byte header (nonce area ignored)
+   * @param {Uint32Array} midstate  8 u32 — SHA-256 state after header block 1
+   * @param {Uint8Array}  target32  32-byte big-endian target
+   */
+  async runBatch(header80, midstate, target32, nonceStart, batchSize) {
     // WebGPU limit: maxComputeWorkgroupsPerDimension = 65535, so a dispatch
     // covers at most 65535 * 256 threads. Larger batches (e.g. the 16M UI
     // option = 65536 workgroups) trigger an async validation error that
     // silently drops the whole dispatch — fake hashrate, zero real work.
     batchSize = Math.min(batchSize, 65535 * 256);
-    // Flat layout: [header x20][target x8][nonce_start][batch_size]
-    const data = new Uint32Array(30);
+    // Flat layout: [header x20][target x8][nonce_start][batch_size][midstate x8]
+    const data = new Uint32Array(38);
     const hdv  = new DataView(header80.buffer, header80.byteOffset, 80);
     for (let i = 0; i < 20; i++) data[i]    = hdv.getUint32(i * 4, false);
     const tdv  = new DataView(target32.buffer, target32.byteOffset, 32);
     for (let i = 0; i < 8;  i++) data[20+i] = tdv.getUint32(i * 4, false);
     data[28] = nonceStart >>> 0;
     data[29] = batchSize >>> 0;
+    data.set(midstate, 30);
 
     this.device.queue.writeBuffer(this.inputBuf,  0, data);
     // Reset: foundCount=0, nonce slots [1..4]=0, packedBest=0xFFFFFFFF, spares=0
@@ -669,6 +706,8 @@ class LuckyHashMiner {
     this._durationLimit = 0;
     this._merkleKey    = '';
     this._bestPacked   = 0x100000000;
+    this._header76     = null;  // cached 76-byte header for the current en2 span
+    this._midstate     = null;  // SHA-256 state after header block 1 (GPU)
   }
 
   // ── Helpers to update Alpine UI state ────────────────────────
@@ -1012,11 +1051,14 @@ class LuckyHashMiner {
 
       const job = this.currentJob;
       const en2 = this._en2Counter.toString(16).padStart(this.extranonce2Size * 2, '0');
-      // Cache: rebuild the merkle root only when job/extranonce changed —
-      // previously recomputed (up to 2×SHA256d per branch) on every batch
+      // Cache: rebuild the merkle root + header + SHA-256 midstate only when
+      // job/extranonce changed — previously recomputed on every batch
       const mk = `${this.extranonce1}:${en2}:${job.jobId}`;
       if (this._merkleKey !== mk) {
         job.merkleRoot = buildMerkleRoot(job, this.extranonce1, en2);
+        this._header76 = buildHeader76(job);
+        // GPU midstate: first 64 bytes of the header are nonce-independent
+        this._midstate = sha256Midstate(this._header76.slice(0, 64));
         this._merkleKey = mk;
       }
 
@@ -1026,8 +1068,8 @@ class LuckyHashMiner {
       try {
         if (this.engine === 'gpu') {
           _h80 = new Uint8Array(80);
-          _h80.set(buildHeader76(job));
-          const res = await this.gpu.runBatch(_h80, target32, nonceStart >>> 0, BATCH);
+          _h80.set(this._header76);
+          const res = await this.gpu.runBatch(_h80, this._midstate, target32, nonceStart >>> 0, BATCH);
           // A revoked device turns queue ops into silent no-ops that return
           // stale buffer contents (would resubmit duplicates) — detect here
           if (this.gpu.lost) throw new Error('GPU device lost');
@@ -1041,7 +1083,7 @@ class LuckyHashMiner {
             this._checkBestHash(_h80, (nonceStart + off) >>> 0); // async, non-blocking
           }
         } else {
-          const h76 = buildHeader76(job);
+          const h76 = this._header76;
           const tgt = targetToU32(target32);
           const res = await this.cpu.runBatch(h76, tgt, nonceStart >>> 0, BATCH);
           nonces = res.nonces;
