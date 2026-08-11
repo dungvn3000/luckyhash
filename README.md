@@ -70,6 +70,12 @@ python3 -m http.server 8080
 
 Then open **http://localhost:8080** in Chrome 113+ or Edge 113+.
 
+### 2b. Run unit tests (optional, no deps)
+
+```bash
+node --test tests/miner.test.js
+```
+
 ### 3. Configure & mine
 
 1. Enter your **BTC address** (bc1q… or 1…)
