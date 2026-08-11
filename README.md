@@ -14,9 +14,16 @@
 
 | Feature | Description |
 |---------|-------------|
-| 🖥️ **WebGPU Compute** | WGSL SHA256d shader — processes millions of nonces per batch on the GPU |
+| 🖥️ **WebGPU Compute** | WGSL SHA256d shader — millions of nonces per batch; **SHA-256 midstate** (block-1 precomputed on CPU) makes it ~40% faster |
 | 🧵 **CPU Fallback** | Multi-threaded Web Workers kick in automatically when WebGPU isn't available |
 | 🔗 **Stratum Protocol** | Full Stratum JSON-RPC flow: subscribe → authorize → notify → submit |
+| ✅ **Bitcoin-correct compare** | Hash is checked as a **little-endian uint256** (Bitcoin's convention) — shares are accepted by ckpool-family pools, verified live |
+| 🛡️ **Pre-submit verification** | Every found nonce is re-hashed locally against the *current* difficulty — shares that would be rejected ("Above target") are dropped instead of submitted |
+| ⏱️ **Mining Duration** | Auto-stop timer (5 min default, up to 8 h, or unlimited) with live countdown |
+| 🚦 **Anti-spam clamp** | Share difficulty floor of 100 — ignores pools broadcasting absurdly low difficulties |
+| 📈 **Wallet stats** | One-click link to your pool stats page on Helios Pool |
+| 🔄 **No stale cache** | Local JS is loaded with a random `?v=` token per page load |
+| 🧪 **Unit tests** | 18 tests (`node:test`, no deps) covering hashes, midstate, merkle, LE compare |
 | 📊 **Live Hashrate Chart** | Real-time animated chart with 60-sample history |
 | 💾 **Persistent Settings** | Wallet address, worker name, proxy URL saved to `localStorage` |
 | 🎨 **Bootstrap 5 + Alpine.js** | Dark-mode glassmorphism UI with reactive bindings |
@@ -80,8 +87,10 @@ node --test tests/miner.test.js
 
 1. Enter your **BTC address** (bc1q… or 1…)
 2. Set **Worker name** (optional, default: `luckyhash01`)
-3. Set **Proxy URL** (default: `wss://ws.luckyhash.dev`)
-4. Click **Start Mining** 🚀
+3. Set **Proxy URL** (default: `wss://ws.luckyhash.dev`, upstream: [Helios Pool](https://heliospool.com/))
+4. Pick a **Mining Duration** if you want an auto-stop timer (default: 5 minutes)
+5. Click **Start Mining** 🚀
+6. Track accepted shares anytime via the **Check wallet stats** link shown under the BTC address field
 
 ---
 
@@ -122,25 +131,27 @@ All settings persist across sessions via `localStorage`.
 
 ### SHA256d on the GPU (WGSL)
 
-Each GPU thread receives a unique nonce offset and independently computes the double SHA256 of the 80-byte block header:
+Each GPU thread receives a unique nonce offset and independently computes the double SHA256 of the 80-byte block header. The first 64 bytes of the header are identical for every thread of every batch, so JavaScript precomputes their **midstate** once per job — the GPU only runs 2 of the 3 SHA-256 compressions per hash:
 
 ```wgsl
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let nonce = inp[28] + gid.x;          // unique nonce per thread
 
-  // SHA256 pass 1 — 80-byte header (2 blocks)
-  var s1: array<u32, 8> = IV;
-  compress(&w1, &s1);                    // bytes 0–63
-  compress(&w2, &s1);                    // bytes 64–79 + padding
+  // SHA256 pass 1 — block-2 only; block-1 midstate comes from the CPU
+  var s1: array<u32, 8>;
+  for (var i = 0u; i < 8u; i++) { s1[i] = inp[30u + i]; }   // midstate
+  compress(&w2, &s1);                    // bytes 64–79 + nonce + padding
 
   // SHA256 pass 2 — double hash
   var s2: array<u32, 8> = IV;
   compress(&w3, &s2);
 
-  if (hash_below_target) {
-    atomicStore(&out_buf[0], 1u);        // signal found
-    atomicStore(&out_buf[1], nonce);
+  // Bitcoin compares the digest as a LITTLE-ENDIAN uint256
+  // (valid shares have trailing zero bytes, not leading ones)
+  if (le_hash_below_target) {
+    let idx = atomicAdd(&out_buf[0], 1u);  // up to 4 nonces per batch
+    if (idx < 4u) { atomicStore(&out_buf[1u + idx], nonce); }
   }
 }
 ```
@@ -148,8 +159,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 ### Mining Loop
 
 ```
-Job received → Build header (76B) → Dispatch GPU/CPU batch
-→ Read result buffer → Nonce found? → Submit share
+Job received → Merkle root + header (76B) + midstate (cached per en2)
+→ Dispatch GPU/CPU batch → Read result buffer
+→ Nonce found? → Re-hash locally vs CURRENT difficulty → Submit share
 → Increment nonce range → Repeat
 ```
 
@@ -177,7 +189,9 @@ luckyhash/
 ├── style.css       # Custom styles on top of Bootstrap dark theme
 ├── miner.js        # Core logic: Stratum, GPUEngine, CPUEngine, UI state
 ├── worker.js       # CPU Web Worker — standalone SHA256d implementation
-└── bg.js           # Animated particle background canvas
+├── bg.js           # Animated particle background canvas
+└── tests/
+    └── miner.test.js  # Unit tests (node:test, no deps)
 ```
 
 ---
@@ -195,6 +209,7 @@ luckyhash/
 ## 🤝 Related
 
 - [luckyhash_proxy](https://github.com/dungvn3000/luckyhash_proxy) — WebSocket↔Stratum TCP bridge (required)
+- [Helios Pool](https://heliospool.com/) — solo pool (ckpool fork); wallet stats at `stats-btc.heliospool.com/users/<your-address>`
 - [tadu.cloud](https://tadu.cloud) — Developed & maintained by the Tadu team
 
 ---
