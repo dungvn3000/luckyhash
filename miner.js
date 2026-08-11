@@ -1049,6 +1049,11 @@ class LuckyHashMiner {
           _h80   = h76; // 76 bytes; _checkBestHash pads to 80 with nonce
         }
       } catch (e) {
+        // Teardown noise: stop() / auto-stop timer / engine switch destroys
+        // GPU buffers while a batch is still awaiting mapAsync → it rejects
+        // with "Buffer was destroyed". That's expected, not an engine error.
+        if (!this._miningActive || !this.running) continue;
+        if (/destroyed/i.test(e.message)) continue;
         // GPU device revoked mid-mining (phones do this under pressure):
         // retrying on a lost device loops forever → switch to CPU instead
         if (this.engine === 'gpu' && (this.gpu.lost || /lost/i.test(e.message))) {
