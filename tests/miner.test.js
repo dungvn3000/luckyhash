@@ -272,6 +272,54 @@ test('worker bswap32 byte swap', () => {
   assert.equal(W.bswap32(0), 0);
 });
 
+// ═══ 6b. Worker midstate hot loop (CPU optimization) ═══════════════════════
+test('worker mineBatch midstate path === full sha256d on random headers', () => {
+  // The optimized loop compresses block 1 once (midstate) then specializes
+  // block 2 + pass 2. Verify share detection is byte-identical to a naive
+  // full sha256d over many random headers and an easy target.
+  for (let t = 0; t < 25; t++) {
+    const h76 = crypto.randomBytes(76);
+    const tgt = new Uint32Array(8);
+    tgt[0] = 0x1FFFFFFF; // easy (~1/8) → several hits per batch
+    const start = Math.floor(Math.random() * 0xFFFF0000);
+    const res = W.mineBatch(new Uint8Array(h76), tgt, start, 500);
+
+    // Naive reference: full 80-byte sha256d, LE compare
+    const expected = [];
+    const full = Buffer.alloc(80);
+    h76.copy(full);
+    for (let i = 0; i < 500; i++) {
+      const nonce = (start + i) >>> 0;
+      full.writeUInt32LE(nonce, 76);
+      const d = cSha256d(full);
+      let valid = false;
+      for (let j = 0; j < 8; j++) {
+        const hw = d.readUInt32LE((7 - j) * 4); // bswap32(BE word) === LE read
+        if (hw < tgt[j]) { valid = true; break; }
+        if (hw > tgt[j]) { valid = false; break; }
+        if (j === 7) valid = true;
+      }
+      if (valid) expected.push(nonce);
+    }
+    assert.deepEqual(res.nonces, expected);
+    assert.equal(res.hashes, 500);
+  }
+});
+
+test('worker mineBatch: repeated calls are stateless (preallocated buffers reset)', () => {
+  // Buffers (_mid/_s1/_s2/W) are module-level and reused — a second batch
+  // with a different header must not inherit state from the first.
+  const job = {
+    version: GENESIS.version, nTime: GENESIS.nTime, nBits: GENESIS.nBits,
+    prevHash: GENESIS.prevHash, merkleRoot: GENESIS.merkleRoot,
+  };
+  const h76 = M.buildHeader76(job);
+  const tgt = M.targetToU32(M.diffToTarget(1));
+  W.mineBatch(new Uint8Array(crypto.randomBytes(76)), tgt, 0, 100); // pollute state
+  const res = W.mineBatch(h76, tgt, GENESIS.nonce - 50, 101);
+  assert.deepEqual(res.nonces, [GENESIS.nonce]);
+});
+
 // ═══ 7. WGSL shader dataflow (input layout + math replica) ════════════════
 test('WGSL: shader source uses midstate load + LE compare + atomic pre-filter', () => {
   assert.match(M.SHA256_WGSL, /s1\[i\] = inp\[30u \+ i\]/,    'midstate from inp[30..37]');

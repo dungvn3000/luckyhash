@@ -86,7 +86,45 @@ function sha256d(data) {
 // ─── Hot mining loop ──────────────────────────────────────────────────────
 
 /**
- * Mine a batch of nonces.
+ * Compress one 64-byte block already loaded into W[0..15], starting from
+ * state s (Uint32Array(8), mutated in place). Message schedule + 64 rounds.
+ */
+function compressW(s) {
+  for (let i = 16; i < 64; i++) {
+    const s0 = rotr(W[i-15],7)  ^ rotr(W[i-15],18) ^ (W[i-15]>>>3);
+    const s1 = rotr(W[i-2], 17) ^ rotr(W[i-2], 19) ^ (W[i-2] >>>10);
+    W[i] = (W[i-16] + s0 + W[i-7] + s1) >>> 0;
+  }
+  let a=s[0],b=s[1],c=s[2],d=s[3],e=s[4],f=s[5],g=s[6],h=s[7];
+  for (let i = 0; i < 64; i++) {
+    const S1  = rotr(e,6)  ^ rotr(e,11)  ^ rotr(e,25);
+    const ch  = (e & f) ^ (~e & g);
+    const t1  = (h + S1 + ch + K[i] + W[i]) >>> 0;
+    const S0  = rotr(a,2)  ^ rotr(a,13)  ^ rotr(a,22);
+    const maj = (a & b) ^ (a & c) ^ (b & c);
+    const t2  = (S0 + maj) >>> 0;
+    h=g; g=f; f=e; e=(d+t1)>>>0;
+    d=c; c=b; b=a; a=(t1+t2)>>>0;
+  }
+  s[0]=(s[0]+a)>>>0; s[1]=(s[1]+b)>>>0; s[2]=(s[2]+c)>>>0; s[3]=(s[3]+d)>>>0;
+  s[4]=(s[4]+e)>>>0; s[5]=(s[5]+f)>>>0; s[6]=(s[6]+g)>>>0; s[7]=(s[7]+h)>>>0;
+}
+
+// Preallocated state buffers for the hot loop (no per-nonce allocation)
+const _mid = new Uint32Array(8); // midstate after header block 1
+const _s1  = new Uint32Array(8); // pass-1 running state
+const _s2  = new Uint32Array(8); // pass-2 running state
+const IV = new Uint32Array([
+  0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+  0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19,
+]);
+
+/**
+ * Mine a batch of nonces — midstate-optimized SHA256d:
+ *   • Header bytes 0-63 are nonce-independent → compress ONCE into _mid,
+ *     then each nonce only compresses block 2 + the 32-byte pass-2 block
+ *     (2 compressions instead of 3 → ~33% less work than the generic path).
+ *   • All buffers preallocated; zero allocation per nonce.
  * @param {Uint8Array} header76  - First 76 bytes of block header (no nonce)
  * @param {Uint32Array} target   - 8 u32 big-endian target
  * @param {number} nonceStart
@@ -94,25 +132,48 @@ function sha256d(data) {
  * @returns {{ nonces: number[], hashes: number }}
  */
 function mineBatch(header76, target, nonceStart, batchSize) {
-  const full = new Uint8Array(80);
-  full.set(header76, 0);
-  const dv = new DataView(full.buffer);
+  const hdv = new DataView(header76.buffer, header76.byteOffset, 76);
   const nonces = [];
+
+  // Midstate: compress header block 1 (bytes 0-63) once for the whole batch
+  _mid.set(IV);
+  for (let i = 0; i < 16; i++) W[i] = hdv.getUint32(i * 4, false);
+  compressW(_mid);
+
+  // Header tail (bytes 64-75) — constant words of block 2
+  const t0 = hdv.getUint32(64, false);
+  const t1 = hdv.getUint32(68, false);
+  const t2 = hdv.getUint32(72, false);
 
   for (let i = 0; i < batchSize; i++) {
     const nonce = (nonceStart + i) >>> 0;
-    // Write nonce little-endian at bytes 76-79
-    dv.setUint32(76, nonce, true);
 
-    const hash = sha256d(full);
+    // Pass 1, block 2: tail + nonce (LE bytes = bswap of the u32) + padding
+    _s1.set(_mid);
+    W[0] = t0; W[1] = t1; W[2] = t2;
+    W[3] = bswap32(nonce);
+    W[4] = 0x80000000;
+    W[5]=0; W[6]=0; W[7]=0; W[8]=0; W[9]=0; W[10]=0;
+    W[11]=0; W[12]=0; W[13]=0; W[14]=0;
+    W[15] = 640; // 80 * 8 bits
+    compressW(_s1);
+
+    // Pass 2: hash the 32-byte digest
+    _s2.set(IV);
+    W[0]=_s1[0]; W[1]=_s1[1]; W[2]=_s1[2]; W[3]=_s1[3];
+    W[4]=_s1[4]; W[5]=_s1[5]; W[6]=_s1[6]; W[7]=_s1[7];
+    W[8] = 0x80000000;
+    W[9]=0; W[10]=0; W[11]=0; W[12]=0; W[13]=0; W[14]=0;
+    W[15] = 256; // 32 * 8 bits
+    compressW(_s2);
 
     // Bitcoin compares the digest as a LITTLE-ENDIAN uint256: the most
-    // significant word is hash[7] (trailing digest bytes), byte-swapped to
+    // significant word is _s2[7] (trailing digest bytes), byte-swapped to
     // match the target's big-endian words. A big-endian compare finds
     // "leading-zero" hashes the pool rejects as "Above target".
     let valid = false;
     for (let j = 0; j < 8; j++) {
-      const h = bswap32(hash[7 - j]);
+      const h = bswap32(_s2[7 - j]);
       if (h < target[j]) { valid = true; break; }
       if (h > target[j]) { valid = false; break; }
       if (j === 7) valid = true; // all equal
