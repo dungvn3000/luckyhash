@@ -1006,6 +1006,21 @@ class LuckyHashMiner {
     const [jobId, prevHash, coinb1, coinb2, merkleBranch,
            versionHex, nBitsHex, nTimeHex, cleanJobs] = params;
 
+    if (this._ui) {
+      this._ui.pool.jobId      = jobId;
+      this._ui.pool.targetBits = nBitsHex;
+      this._ui.pool.cleanJobs  = cleanJobs ? 'Yes' : 'No';
+    }
+
+    // Max-speed policy: only switch jobs when the pool invalidates prior
+    // work (clean_jobs=true). With clean_jobs=false shares on the old job
+    // stay valid, so switching would just waste the in-flight batch on a
+    // midstate rebuild + nonce-range restart — keep mining the current job.
+    if (this.currentJob && !cleanJobs) {
+      this.log(`📦 Job ${jobId} — keeping job ${this.currentJob.jobId} (clean_jobs=false)`, 'info');
+      return;
+    }
+
     const prevHashLE = prevHash.match(/.{8}/g).map(x => reverseHex(x)).join('');
     this.currentJob = {
       jobId, coinb1, coinb2, merkleBranch,
@@ -1015,13 +1030,7 @@ class LuckyHashMiner {
       prevHash: prevHashLE,
     };
 
-    if (this._ui) {
-      this._ui.pool.jobId      = jobId;
-      this._ui.pool.targetBits = nBitsHex;
-      this._ui.pool.cleanJobs  = cleanJobs ? 'Yes' : 'No';
-    }
-
-    this.log(`📦 Job ${jobId}${cleanJobs ? ' (clean)' : ''}`, 'info');
+    this.log(`📦 Job ${jobId}${cleanJobs ? ' (clean)' : '(initial)'}`, 'info');
     this._jobChanged = true;
 
     if (!this._miningActive) {
