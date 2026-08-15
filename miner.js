@@ -928,7 +928,7 @@ class LuckyHashMiner {
   _onOpen(addr, worker) {
     this.log('🔗 Connected! Subscribing…', 'success');
     this._setStatus('connected', 'Connected');
-    this.stratum.send('mining.subscribe', ['LuckyHashWebGPU/1.0', null]);
+    this.stratum.send('mining.subscribe', ['LuckyHash.dev/1.0', null]);
   }
 
   _onClose(e) {
