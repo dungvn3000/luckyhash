@@ -297,8 +297,10 @@ class GPUEngine {
   constructor() {
     this.device    = null;
     this.pipeline  = null;
-    this.slots     = [];    // 2 buffer sets → double-buffered dispatch
-    this._next     = 0;     // round-robin slot index
+    this.inputBuf  = null;
+    this.resultBuf = null;
+    this.readBuf   = null;
+    this.bindGroup = null;
     this.ready     = false;
   }
 
@@ -316,6 +318,15 @@ class GPUEngine {
       this.lostReason = `${info.reason}${info.message ? ': ' + info.message : ''}`;
     });
 
+    // NOTE: single-buffered on purpose. A double-buffered variant (submit
+    // batch N+1 before reading batch N) was tried and measured SLOWER in
+    // Chrome: mapAsync resolution gets delayed behind the next dispatch,
+    // stretching every loop iteration. One dispatch in flight is optimal here.
+    // 38 u32 = 152 bytes input; pad to 256 for alignment
+    this.inputBuf  = this.device.createBuffer({ size: 256, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.resultBuf = this.device.createBuffer({ size: 32,  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    this.readBuf   = this.device.createBuffer({ size: 32,  usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+
     // Capture shader compile errors explicitly
     this.device.pushErrorScope('validation');
     const module = this.device.createShaderModule({ code: SHA256_WGSL });
@@ -327,48 +338,27 @@ class GPUEngine {
       compute: { module, entryPoint: 'main' },
     });
 
-    // Two independent buffer sets: batch N+1 is submitted while batch N's
-    // readback is still in flight, so the GPU never sits idle between
-    // dispatches waiting on mapAsync + JS result handling.
-    this.slots = [];
-    this._next = 0;
-    for (let i = 0; i < 2; i++) {
-      // 38 u32 = 152 bytes input; pad to 256 for alignment
-      const inputBuf  = this.device.createBuffer({ size: 256, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-      const resultBuf = this.device.createBuffer({ size: 32,  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
-      const readBuf   = this.device.createBuffer({ size: 32,  usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-      const bindGroup = this.device.createBindGroup({
-        layout: this.pipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: { buffer: inputBuf  } },
-          { binding: 1, resource: { buffer: resultBuf } },
-        ],
-      });
-      this.slots.push({ inputBuf, resultBuf, readBuf, bindGroup });
-    }
+    this.bindGroup = this.device.createBindGroup({
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.inputBuf  } },
+        { binding: 1, resource: { buffer: this.resultBuf } },
+      ],
+    });
     this.ready = true;
   }
 
   /**
-   * Submit one batch WITHOUT waiting for the result — returns a promise that
-   * resolves when the readback completes. Alternates between 2 buffer slots;
-   * safe as long as at most 2 batches are in flight (the mining loop awaits
-   * batch N before submitting batch N+2, so a slot is never reused early).
-   *
    * @param {Uint8Array}  header80  80-byte header (nonce area ignored)
    * @param {Uint32Array} midstate  8 u32 — SHA-256 state after header block 1
    * @param {Uint8Array}  target32  32-byte big-endian target
-   * @returns {Promise<{nonces:number[], minPacked:number}>}
    */
-  submitBatch(header80, midstate, target32, nonceStart, batchSize) {
+  async runBatch(header80, midstate, target32, nonceStart, batchSize) {
     // WebGPU limit: maxComputeWorkgroupsPerDimension = 65535, so a dispatch
     // covers at most 65535 * 256 threads. Larger batches (e.g. the 16M UI
     // option = 65536 workgroups) trigger an async validation error that
     // silently drops the whole dispatch — fake hashrate, zero real work.
     batchSize = Math.min(batchSize, 65535 * 256);
-    const slot = this.slots[this._next];
-    this._next = (this._next + 1) % this.slots.length;
-
     // Flat layout: [header x20][target x8][nonce_start][batch_size][midstate x8]
     const data = new Uint32Array(38);
     const hdv  = new DataView(header80.buffer, header80.byteOffset, 80);
@@ -379,43 +369,32 @@ class GPUEngine {
     data[29] = batchSize >>> 0;
     data.set(midstate, 30);
 
-    this.device.queue.writeBuffer(slot.inputBuf,  0, data);
+    this.device.queue.writeBuffer(this.inputBuf,  0, data);
     // Reset: foundCount=0, nonce slots [1..4]=0, packedBest=0xFFFFFFFF, spares=0
-    this.device.queue.writeBuffer(slot.resultBuf, 0, new Uint32Array([0, 0, 0, 0, 0, 0xFFFFFFFF, 0, 0]));
+    this.device.queue.writeBuffer(this.resultBuf, 0, new Uint32Array([0, 0, 0, 0, 0, 0xFFFFFFFF, 0, 0]));
 
     const enc  = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
     pass.setPipeline(this.pipeline);
-    pass.setBindGroup(0, slot.bindGroup);
+    pass.setBindGroup(0, this.bindGroup);
     pass.dispatchWorkgroups(Math.ceil(batchSize / 256));
     pass.end();
-    enc.copyBufferToBuffer(slot.resultBuf, 0, slot.readBuf, 0, 32);
+    enc.copyBufferToBuffer(this.resultBuf, 0, this.readBuf, 0, 32);
     this.device.queue.submit([enc.finish()]);
-
-    return slot.readBuf.mapAsync(GPUMapMode.READ).then(() => {
-      const v = new Uint32Array(slot.readBuf.getMappedRange().slice(0));
-      slot.readBuf.unmap();
-      // Up to 4 winning nonces per batch (hits beyond that are dropped)
-      const foundCount = Math.min(v[0], 4);
-      const nonces = [];
-      for (let i = 0; i < foundCount; i++) nonces.push(v[1 + i]);
-      return {
-        nonces,
-        minPacked: v[5], // (LE-top-byte(hash) << 24) | thread offset — consistent pair
-      };
-    });
+    await this.readBuf.mapAsync(GPUMapMode.READ);
+    const v     = new Uint32Array(this.readBuf.getMappedRange().slice(0));
+    this.readBuf.unmap();
+    // Up to 4 winning nonces per batch (hits beyond that are dropped)
+    const foundCount = Math.min(v[0], 4);
+    const nonces = [];
+    for (let i = 0; i < foundCount; i++) nonces.push(v[1 + i]);
+    return {
+      nonces,
+      minPacked: v[5],   // (LE-top-byte(hash) << 24) | thread offset — consistent pair
+    };
   }
-
-  /** Submit + wait — kept for one-off use; the mining loop pipelines instead */
-  runBatch(header80, midstate, target32, nonceStart, batchSize) {
-    return this.submitBatch(header80, midstate, target32, nonceStart, batchSize);
-  }
-
   destroy() {
-    for (const s of this.slots) {
-      s.inputBuf?.destroy(); s.resultBuf?.destroy(); s.readBuf?.destroy();
-    }
-    this.slots = [];
+    this.inputBuf?.destroy(); this.resultBuf?.destroy(); this.readBuf?.destroy();
     this.device?.destroy(); this.ready = false;
   }
 }
@@ -1091,8 +1070,6 @@ class LuckyHashMiner {
     // so hash accounting matches the work actually performed
     const BATCH = Math.min(rawBatch, 65535 * 256);
     let nonceStart = 0;
-    // GPU pipeline: metadata of the in-flight batch (submitted, not yet read)
-    let gpuPrev = null;
 
     while (this._miningActive && this.running) {
       if (!this.currentJob) { await new Promise(r => setTimeout(r, 200)); continue; }
@@ -1127,36 +1104,23 @@ class LuckyHashMiner {
 
       try {
         if (this.engine === 'gpu') {
-          // Double-buffered pipeline: submit THIS batch first, then await the
-          // PREVIOUS one — the GPU crunches batch N+1 while JS is still
-          // reading back / processing batch N. No idle gap between dispatches.
           const h80 = new Uint8Array(80);
           h80.set(this._header76);
-          const cur = {
-            promise: this.gpu.submitBatch(h80, this._midstate, target32, nonceStart >>> 0, BATCH),
-            job, en2, h80, nonceStart: nonceStart >>> 0,
-          };
-          cur.promise.catch(() => {}); // silence rejection if never awaited (teardown)
-          const prev = gpuPrev;
-          gpuPrev = cur;
-          if (prev) {
-            const res = await prev.promise;
-            // A revoked device turns queue ops into silent no-ops that return
-            // stale buffer contents (would resubmit duplicates) — detect here
-            if (this.gpu.lost) throw new Error('GPU device lost');
-            nonces = res.nonces;
-            hashes = BATCH;
-            meta   = prev; // results belong to the batch's own job/en2/header
-            // Realtime best hash: GPU tracked a packed (quality, offset) key —
-            // the low 24 bits hold the thread offset of the batch's best hash
-            if (res.minPacked < this._bestPacked) {
-              this._bestPacked = res.minPacked;
-              const off = res.minPacked & 0xFFFFFF;
-              this._checkBestHash(prev.h80, (prev.nonceStart + off) >>> 0); // async, non-blocking
-            }
+          const res = await this.gpu.runBatch(h80, this._midstate, target32, nonceStart >>> 0, BATCH);
+          // A revoked device turns queue ops into silent no-ops that return
+          // stale buffer contents (would resubmit duplicates) — detect here
+          if (this.gpu.lost) throw new Error('GPU device lost');
+          nonces = res.nonces;
+          hashes = BATCH;
+          meta   = { job, en2, h80 };
+          // Realtime best hash: GPU tracked a packed (quality, offset) key —
+          // the low 24 bits hold the thread offset of the batch's best hash
+          if (res.minPacked < this._bestPacked) {
+            this._bestPacked = res.minPacked;
+            const off = res.minPacked & 0xFFFFFF;
+            this._checkBestHash(h80, (nonceStart + off) >>> 0); // async, non-blocking
           }
         } else {
-          gpuPrev = null; // drop any stale GPU in-flight batch after a switch
           const h76 = this._header76;
           const tgt = targetToU32(target32);
           const res = await this.cpu.runBatch(h76, tgt, nonceStart >>> 0, BATCH);
@@ -1165,7 +1129,6 @@ class LuckyHashMiner {
           meta   = { job, en2, h80: h76 }; // 76 bytes; _checkBestHash pads to 80 with nonce
         }
       } catch (e) {
-        gpuPrev = null; // in-flight batch is unusable after any engine error
         // Teardown noise: stop() / auto-stop timer / engine switch destroys
         // GPU buffers while a batch is still awaiting mapAsync → it rejects
         // with "Buffer was destroyed". That's expected, not an engine error.
